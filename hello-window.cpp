@@ -2,6 +2,32 @@
 #include <GLFW/glfw3.h> // GLFW helper library
 #include <stdio.h>
 #include <unistd.h>
+#include "shader_s.h"
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+void updateFpsCounter(GLFWwindow* window) {
+  static double previous_seconds = glfwGetTime();
+  static int frame_count;
+  double current_seconds = glfwGetTime();
+  double elapsed_seconds = current_seconds - previous_seconds;
+  if (elapsed_seconds > 0.25) {
+    previous_seconds = current_seconds;
+    double fps = (double)frame_count / elapsed_seconds;
+    char tmp[128];
+    sprintf(tmp, "opengl @ fps: %.2f", fps);
+    glfwSetWindowTitle(window, tmp);
+    frame_count = 0;
+  }
+  frame_count++;
+}
+
+typedef struct {
+  float x, y, z;
+
+} Widget;
 
 int main() {
 
@@ -16,6 +42,9 @@ int main() {
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+  // antialiasing
+  glfwWindowHint(GLFW_SAMPLES, 4);
+
   GLFWwindow* window = glfwCreateWindow(640, 480, "Hello Triangle", NULL, NULL);
   if (!window) {
     fprintf(stderr, "ERROR: could not open window with GLFW3\n");
@@ -24,11 +53,9 @@ int main() {
   }
   glfwMakeContextCurrent(window);
 
-  // start GLEW extension handler
   glewExperimental = GL_TRUE;
   glewInit();
 
-  // get version info
   const GLubyte* renderer = glGetString(GL_RENDERER); // get renderer string
   const GLubyte* version = glGetString(GL_VERSION); // version as a string
   printf("Renderer: %s\n", renderer);
@@ -41,15 +68,15 @@ int main() {
   /* OTHER STUFF GOES HERE NEXT */
 
   float points[] = {
-      0.0f,  0.5f,  0.0f,
-      0.5f, -0.5f,  0.0f,
-      -0.5f, -0.5f,  0.0f
+       0.0f,  0.5f,  0.0f,
+       0.5f, -0.5f,  0.0f,
+      -0.5f, -0.5f,  0.0f,
   };
 
   GLuint vbo = 0;
   glGenBuffers(1, &vbo);
   glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  glBufferData(GL_ARRAY_BUFFER, 9 * sizeof(float), points, GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(points), points, GL_STATIC_DRAW);
 
   GLuint vao = 0;
   glGenVertexArrays(1, &vao);
@@ -58,36 +85,26 @@ int main() {
   glBindBuffer(GL_ARRAY_BUFFER, vbo);
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
 
-  const char* vertex_shader =
-      "#version 400\n"
-      "in vec3 vp;"
-      "void main() {"
-      "  gl_Position = vec4(vp, 1.0);"
-      "}";
+  std::string shaderDir = SHADER_DIR;
 
-  const char* fragment_shader =
-      "#version 400\n"
-      "out vec4 frag_colour;"
-      "void main() {"
-      "  frag_colour = vec4(0.5, 0.0, 0.5, 1.0);"
-      "}";
-
-  GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-  glShaderSource(vs, 1, &vertex_shader, NULL);
-  glCompileShader(vs);
-  GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(fs, 1, &fragment_shader, NULL);
-  glCompileShader(fs);
-
-  GLuint shader_programme = glCreateProgram();
-  glAttachShader(shader_programme, fs);
-  glAttachShader(shader_programme, vs);
-  glLinkProgram(shader_programme);
+  Shader shader("test.vert", "test.frag");
 
   while(!glfwWindowShouldClose(window)) {
+    updateFpsCounter(window);
     // wipe the drawing surface clear
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glUseProgram(shader_programme);
+//    glClearColor(0.6f, 0.6f, 0.8f, 1.0f);
+
+// create transformations
+    glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
+//    transform = glm::translate(transform, glm::vec3(0.5f, -0.5f, 0.0f));
+    transform = glm::rotate(transform, (float)glfwGetTime(), glm::vec3(0.0f, 0.0f, 1.0f));
+
+    shader.use();
+    unsigned int transformLoc = glGetUniformLocation(shader.ID, "transform");
+    glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(transform));
+
+
     glBindVertexArray(vao);
     // draw points 0-3 from the currently bound VAO with current in-use shader
     glDrawArrays(GL_TRIANGLES, 0, 3);
