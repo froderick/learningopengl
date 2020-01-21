@@ -11,5 +11,5 @@ link_directories(/usr/local/lib)
 find_package(OpenGL REQUIRED)
 find_package(glm REQUIRED)
 
-add_executable(hello-window hello-window.cpp)
+add_executable(hello-window hello-window.cpp stb_image.cpp)
 target_link_libraries(hello-window glew glfw glm ${OPENGL_gl_LIBRARY})
