@@ -193,15 +193,23 @@ typedef struct {
   float x, y, z;
 } Point;
 
-typedef enum ObjType {
+typedef enum {
   O_SHIP,
   O_SHIP_LASER_SHOT,
   O_ENEMY_SHIP,
   O_ENEMY_SHIP_LASER_SHOT,
-};
+} ObjType;
+
+typedef struct Object Object;
+typedef void (*UpdateFn)(Object *obj);
 
 typedef struct {
   Point position;
+
+  bool moveLeft;
+  bool moveRight;
+  bool moveUp;
+  bool moveDown;
 
 } Ship;
 
@@ -220,7 +228,7 @@ typedef struct {
 
 } EnemyShipLaserShot;
 
-typedef struct {
+struct Object {
   uint64_t id;
   ObjType type;
   union {
@@ -229,13 +237,34 @@ typedef struct {
     EnemyShip enemyShip;
     EnemyShipLaserShot enemyShipLaserShot;
   };
-} Object;
+  UpdateFn updateFn;
+};
 
 typedef struct {
   uint64_t objectIdCounter = 0;
   std::vector<Object> objects;
   Object *ship;
 } Objects;
+
+// game object update code
+
+const float SHIP_MOVE_SPEED = .009f;
+
+void shipUpdateFn(Object *obj) {
+  Ship *ship = &obj->ship;
+  if (ship->moveUp) {
+    ship->position.y += SHIP_MOVE_SPEED;
+  }
+  if (ship->moveDown) {
+    ship->position.y -= SHIP_MOVE_SPEED;
+  }
+  if (ship->moveLeft) {
+    ship->position.x -= SHIP_MOVE_SPEED;
+  }
+  if (ship->moveRight) {
+    ship->position.x += SHIP_MOVE_SPEED;
+  }
+}
 
 void objectsInit(Objects *objects) {
 
@@ -246,9 +275,17 @@ void objectsInit(Objects *objects) {
   obj.id = objects->objectIdCounter++;
   obj.type = O_SHIP;
   obj.ship = ship;
+  obj.updateFn = shipUpdateFn;
 
   objects->objects.push_back(obj);
   objects->ship = &objects->objects.at(0);
+}
+
+void objectsTick(Objects *objects) {
+  for (uint64_t i = 0; i<objects->objects.size(); i++) {
+    Object *obj = &objects->objects[i];
+    obj->updateFn(obj);
+  }
 }
 
 // ////////////////////// object rendering
@@ -342,6 +379,82 @@ void objectsRender(Objects *objects, ObjectsRenderer *objectsRenderer) {
   }
 }
 
+
+typedef struct {
+  Stars stars;
+  Objects objects;
+  StarsRenderer starsRenderer;
+  ObjectsRenderer objectsRenderer;
+} Game;
+
+void gameInit(Game *game) {
+  starsInit(&game->stars);
+  objectsInit(&game->objects);
+  starsRendererInit(&game->starsRenderer);
+  objectsRendererInit(&game->objectsRenderer);
+}
+
+thread_local Game *gameRef;
+
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+
+  switch (key) {
+    case GLFW_KEY_UP:
+      if (action == GLFW_PRESS) {
+        gameRef->objects.ship->ship.moveUp = true;
+      }
+      else if (action == GLFW_RELEASE) {
+        gameRef->objects.ship->ship.moveUp = false;
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    case GLFW_KEY_DOWN:
+      if (action == GLFW_PRESS) {
+        gameRef->objects.ship->ship.moveDown= true;
+      }
+      else if (action == GLFW_RELEASE) {
+        gameRef->objects.ship->ship.moveDown= false;
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    case GLFW_KEY_LEFT:
+      if (action == GLFW_PRESS) {
+        gameRef->objects.ship->ship.moveLeft= true;
+      }
+      else if (action == GLFW_RELEASE) {
+        gameRef->objects.ship->ship.moveLeft= false;
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    case GLFW_KEY_RIGHT:
+      if (action == GLFW_PRESS) {
+        gameRef->objects.ship->ship.moveRight= true;
+      }
+      else if (action == GLFW_RELEASE) {
+        gameRef->objects.ship->ship.moveRight= false;
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    case GLFW_KEY_SPACE:
+      break;
+    default:
+      break;
+  }
+
+  if (key == GLFW_KEY_UP && action == GLFW_PRESS) {
+    printf("pressed\n");
+    printf("game: %u\n", gameRef != NULL);
+  }
+}
+
 int main() {
 
   if (!glfwInit()) {
@@ -371,33 +484,29 @@ int main() {
 
   // //////////////////////////////////
 
-  Stars stars;
-  starsInit(&stars);
+  Game game;
+  gameInit(&game);
+  gameRef = &game;
 
-  Objects objects;
-  objectsInit(&objects);
-
-  StarsRenderer r;
-  starsRendererInit(&r);
-
-  ObjectsRenderer objectsRenderer;
-  objectsRendererInit(&objectsRenderer);
+  glfwSetKeyCallback(window, keyCallback);
 
   while (!glfwWindowShouldClose(window)) {
 
+    glfwPollEvents();
+
     // update
 
-    starsTick(&stars);
+    starsTick(&game.stars);
+    objectsTick(&game.objects);
 
     // draw
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    starsRender(&stars, &r);
-    objectsRender(&objects, &objectsRenderer);
+    starsRender(&game.stars, &game.starsRenderer);
+    objectsRender(&game.objects, &game.objectsRenderer);
 
     glfwSwapBuffers(window);
-    glfwPollEvents();
   }
 }
