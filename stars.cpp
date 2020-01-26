@@ -13,6 +13,68 @@
 #include <vector>
 
 /*
+ * white rectangle
+ */
+
+typedef struct {
+  unsigned int VBO, VAO, EBO;
+  Shader *shader;
+} GeneralRect;
+
+void generalRectInit(GeneralRect *ctx, float width, float height) {
+
+// set up vertex data (and buffer(s)) and configure vertex attributes
+// ------------------------------------------------------------------
+  float vertices[] = {
+      // positions        // colors         // texture coords
+      width,  height, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, // top right
+      width, -height, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, // bottom right
+      -width, -height, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, // bottom left
+      -width,  height, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f  // top left
+  };
+  unsigned int indices[] = {
+      0, 1, 3, // first triangle
+      1, 2, 3  // second triangle
+  };
+  glGenVertexArrays(1, &ctx->VAO);
+  glGenBuffers(1, &ctx->VBO);
+  glGenBuffers(1, &ctx->EBO);
+
+  glBindVertexArray(ctx->VAO);
+
+  glBindBuffer(GL_ARRAY_BUFFER, ctx->VBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ctx->EBO);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+// position attribute
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) 0);
+  glEnableVertexAttribArray(0);
+// color attribute
+  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (3 * sizeof(float)));
+  glEnableVertexAttribArray(1);
+// texture coord attribute
+  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (6 * sizeof(float)));
+  glEnableVertexAttribArray(2);
+
+  ctx->shader = new Shader("stars.vert", "stars.frag");
+}
+
+void generalRectRender(GeneralRect *rect, float x, float y) {
+
+  rect->shader->use();
+  unsigned int transformLoc = glGetUniformLocation(rect->shader->ID, "transform");
+
+  glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
+  transform = glm::translate(transform, glm::vec3(x , y, 0.0f));
+  glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(transform));
+
+  glBindVertexArray(rect->VAO);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+}
+
+/*
  * stars
  */
 
@@ -103,62 +165,29 @@ void starsTick(Stars *stars) {
 }
 
 typedef struct {
-  unsigned int VBO, VAO, EBO;
+  GeneralRect rect;
 } StarMesh;
 
 void starMeshInit(StarMesh *mesh, float size) {
-
-// set up vertex data (and buffer(s)) and configure vertex attributes
-// ------------------------------------------------------------------
-  float vertices[] = {
-      // positions        // colors         // texture coords
-       size,  size, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, // top right
-       size, -size, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, // bottom right
-      -size, -size, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, // bottom left
-      -size,  size, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f  // top left
-  };
-  unsigned int indices[] = {
-      0, 1, 3, // first triangle
-      1, 2, 3  // second triangle
-  };
-  glGenVertexArrays(1, &mesh->VAO);
-  glGenBuffers(1, &mesh->VBO);
-  glGenBuffers(1, &mesh->EBO);
-
-  glBindVertexArray(mesh->VAO);
-
-  glBindBuffer(GL_ARRAY_BUFFER, mesh->VBO);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->EBO);
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-// position attribute
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) 0);
-  glEnableVertexAttribArray(0);
-// color attribute
-  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (3 * sizeof(float)));
-  glEnableVertexAttribArray(1);
-// texture coord attribute
-  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (6 * sizeof(float)));
-  glEnableVertexAttribArray(2);
+  generalRectInit(&mesh->rect, size, size);
 }
 
 typedef struct {
   StarMesh meshSmall, meshMedium, meshLarge;
-  Shader shader = Shader("stars.vert", "stars.frag");
+  Shader *shader;
 } StarsRenderer;
 
 void starsRendererInit(StarsRenderer *r) {
   starMeshInit(&r->meshSmall, STAR_SMALL_SIZE);
   starMeshInit(&r->meshMedium, STAR_MEDIUM_SIZE);
   starMeshInit(&r->meshLarge, STAR_LARGE_SIZE);
+  r->shader = new Shader("stars.vert", "stars.frag");
 }
 
 void starsRender(Stars *stars, StarsRenderer *r) {
 
-  r->shader.use();
-  unsigned int transformLoc = glGetUniformLocation(r->shader.ID, "transform");
+  r->shader->use();
+  unsigned int transformLoc = glGetUniformLocation(r->shader->ID, "transform");
 
   for (Star s : stars->stars) {
 
@@ -180,7 +209,7 @@ void starsRender(Stars *stars, StarsRenderer *r) {
       throw std::runtime_error("no such star type");
     }
 
-    glBindVertexArray(mesh->VAO);
+    glBindVertexArray(mesh->rect.VAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
   }
 }
@@ -202,6 +231,7 @@ typedef enum {
 
 typedef struct Object Object;
 typedef void (*UpdateFn)(Object *obj);
+typedef void (*RenderFn)(Object *obj, void* context);
 
 typedef struct {
   Point position;
@@ -238,17 +268,18 @@ struct Object {
     EnemyShipLaserShot enemyShipLaserShot;
   };
   UpdateFn updateFn;
+  void *renderContext;
+  RenderFn renderFn;
 };
 
 typedef struct {
-  uint64_t objectIdCounter = 0;
-  std::vector<Object> objects;
-  Object *ship;
 } Objects;
 
 // game object update code
 
 const float SHIP_MOVE_SPEED = .009f;
+const float SHIP_WIDTH = 0.04f;
+const float SHIP_HEIGHT = 0.08f;
 
 void shipUpdateFn(Object *obj) {
   Ship *ship = &obj->ship;
@@ -266,132 +297,74 @@ void shipUpdateFn(Object *obj) {
   }
 }
 
-void objectsInit(Objects *objects) {
-
-  Ship ship;
-  ship.position = {0, -0.75, 0};
-
-  Object obj;
-  obj.id = objects->objectIdCounter++;
-  obj.type = O_SHIP;
-  obj.ship = ship;
-  obj.updateFn = shipUpdateFn;
-
-  objects->objects.push_back(obj);
-  objects->ship = &objects->objects.at(0);
-}
-
-void objectsTick(Objects *objects) {
-  for (uint64_t i = 0; i<objects->objects.size(); i++) {
-    Object *obj = &objects->objects[i];
-    obj->updateFn(obj);
-  }
-}
-
-// ////////////////////// object rendering
-
-typedef void (*RenderFn)(Object *obj, void* context);
-
 // render ship
 
 typedef struct {
-  unsigned int VBO, VAO, EBO;
-  Shader shader = Shader("stars.vert", "stars.frag");
+  GeneralRect rect;
 } ShipRenderContext;
 
 void shipRenderContextInit(ShipRenderContext *ctx) {
-
-  float width = 0.04f;
-  float height = 0.08f;
-
-// set up vertex data (and buffer(s)) and configure vertex attributes
-// ------------------------------------------------------------------
-  float vertices[] = {
-      // positions        // colors         // texture coords
-      width,  height, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, // top right
-      width, -height, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, // bottom right
-      -width, -height, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, // bottom left
-      -width,  height, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f  // top left
-  };
-  unsigned int indices[] = {
-      0, 1, 3, // first triangle
-      1, 2, 3  // second triangle
-  };
-  glGenVertexArrays(1, &ctx->VAO);
-  glGenBuffers(1, &ctx->VBO);
-  glGenBuffers(1, &ctx->EBO);
-
-  glBindVertexArray(ctx->VAO);
-
-  glBindBuffer(GL_ARRAY_BUFFER, ctx->VBO);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ctx->EBO);
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-// position attribute
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) 0);
-  glEnableVertexAttribArray(0);
-// color attribute
-  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (3 * sizeof(float)));
-  glEnableVertexAttribArray(1);
-// texture coord attribute
-  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (6 * sizeof(float)));
-  glEnableVertexAttribArray(2);
+  generalRectInit(&ctx->rect, SHIP_WIDTH, SHIP_HEIGHT);
 }
 
 void shipRender(Object *obj, void *ptr) {
-
   Ship *ship = &obj->ship;
   ShipRenderContext *ctx = (ShipRenderContext*)ptr;
-
-  ctx->shader.use();
-  unsigned int transformLoc = glGetUniformLocation(ctx->shader.ID, "transform");
-
-  glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
-  transform = glm::translate(transform, glm::vec3(ship->position.x , ship->position.y, 0.0f));
-  glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(transform));
-
-  glBindVertexArray(ctx->VAO);
-  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+  generalRectRender(&ctx->rect, ship->position.x, ship->position.y);
 }
 
-typedef struct {
-  void *renderContext;
-  RenderFn renderFn;
-} Renderer;
-
-typedef struct {
-  std::vector<Renderer> renderers;
-} ObjectsRenderer;
-
-void objectsRendererInit(ObjectsRenderer *renderer) {
-  ShipRenderContext *c = new ShipRenderContext;
-  shipRenderContextInit(c);
-  renderer->renderers.push_back({.renderContext = c, .renderFn = shipRender});
-}
-
-void objectsRender(Objects *objects, ObjectsRenderer *objectsRenderer) {
-  for (uint64_t i=0; i<objects->objects.size(); i++) {
-    Object *obj = &objects->objects.at(i);
-    Renderer *r = &objectsRenderer->renderers.at(obj->type);
-    r->renderFn(obj, r->renderContext);
-  }
-}
-
+// top-level game //////////////////
 
 typedef struct {
   Stars stars;
-  Objects objects;
   StarsRenderer starsRenderer;
-  ObjectsRenderer objectsRenderer;
+
+  uint64_t objectIdCounter = 0;
+  std::vector<Object> objects;
+  Object *ship;
+
 } Game;
 
 void gameInit(Game *game) {
   starsInit(&game->stars);
-  objectsInit(&game->objects);
   starsRendererInit(&game->starsRenderer);
-  objectsRendererInit(&game->objectsRenderer);
+
+  Ship ship;
+  ship.position = {0, -0.75, 0};
+
+  ShipRenderContext *c = (ShipRenderContext*)malloc(sizeof(ShipRenderContext));
+  shipRenderContextInit(c);
+
+  Object obj;
+  obj.id = game->objectIdCounter++;
+  obj.type = O_SHIP;
+  obj.ship = ship;
+  obj.updateFn = shipUpdateFn;
+  obj.renderFn = shipRender;
+  obj.renderContext = c;
+
+  game->objects.push_back(obj);
+  game->ship = &game->objects.at(0);
+}
+
+void gameTick(Game *game) {
+
+  starsTick(&game->stars);
+
+  for (uint64_t i = 0; i<game->objects.size(); i++) {
+    Object *obj = &game->objects[i];
+    obj->updateFn(obj);
+  }
+}
+
+void gameRender(Game *game) {
+
+  starsRender(&game->stars, &game->starsRenderer);
+
+  for (uint64_t i=0; i<game->objects.size(); i++) {
+    Object *obj = &game->objects.at(i);
+    obj->renderFn(obj, obj->renderContext);
+  }
 }
 
 thread_local Game *gameRef;
@@ -401,10 +374,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
   switch (key) {
     case GLFW_KEY_UP:
       if (action == GLFW_PRESS) {
-        gameRef->objects.ship->ship.moveUp = true;
+        gameRef->ship->ship.moveUp = true;
       }
       else if (action == GLFW_RELEASE) {
-        gameRef->objects.ship->ship.moveUp = false;
+        gameRef->ship->ship.moveUp = false;
       }
       else {
         // ignore repeats
@@ -412,10 +385,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     case GLFW_KEY_DOWN:
       if (action == GLFW_PRESS) {
-        gameRef->objects.ship->ship.moveDown= true;
+        gameRef->ship->ship.moveDown= true;
       }
       else if (action == GLFW_RELEASE) {
-        gameRef->objects.ship->ship.moveDown= false;
+        gameRef->ship->ship.moveDown= false;
       }
       else {
         // ignore repeats
@@ -423,10 +396,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     case GLFW_KEY_LEFT:
       if (action == GLFW_PRESS) {
-        gameRef->objects.ship->ship.moveLeft= true;
+        gameRef->ship->ship.moveLeft= true;
       }
       else if (action == GLFW_RELEASE) {
-        gameRef->objects.ship->ship.moveLeft= false;
+        gameRef->ship->ship.moveLeft= false;
       }
       else {
         // ignore repeats
@@ -434,10 +407,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     case GLFW_KEY_RIGHT:
       if (action == GLFW_PRESS) {
-        gameRef->objects.ship->ship.moveRight= true;
+        gameRef->ship->ship.moveRight= true;
       }
       else if (action == GLFW_RELEASE) {
-        gameRef->objects.ship->ship.moveRight= false;
+        gameRef->ship->ship.moveRight= false;
       }
       else {
         // ignore repeats
@@ -447,11 +420,6 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     default:
       break;
-  }
-
-  if (key == GLFW_KEY_UP && action == GLFW_PRESS) {
-    printf("pressed\n");
-    printf("game: %u\n", gameRef != NULL);
   }
 }
 
@@ -494,18 +462,12 @@ int main() {
 
     glfwPollEvents();
 
-    // update
-
-    starsTick(&game.stars);
-    objectsTick(&game.objects);
-
-    // draw
+    gameTick(&game);
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    starsRender(&game.stars, &game.starsRenderer);
-    objectsRender(&game.objects, &game.objectsRenderer);
+    gameRender(&game);
 
     glfwSwapBuffers(window);
   }
