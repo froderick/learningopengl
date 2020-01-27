@@ -13,8 +13,15 @@
 #include <vector>
 
 /*
- * white rectangle
+ * general rectangle
  */
+
+const float COLOR_RED       [3] = {1.0f, 0.0f, 0.0f};
+const float COLOR_GREEN     [3] = {0.0f, 1.0f, 0.0f};
+const float COLOR_BLUE      [3] = {0.0f, 0.0f, 1.0f};
+const float COLOR_WHITE     [3] = {1.0f, 1.0f, 1.0f};
+const float COLOR_YELLOW    [3] = {1.0f, 1.0f, 0.0f};
+const float COLOR_LIGHT_GREY[3] = {0.8f, 0.8f, 0.8f};
 
 typedef struct {
   unsigned int VBO, VAO, EBO;
@@ -29,16 +36,16 @@ void generalRectFactoryInit(GeneralRectFactory *f) {
   f->shader = new Shader("stars.vert", "stars.frag");
 }
 
-void generalRectInit(GeneralRect *ctx, GeneralRectFactory *factory, float width, float height) {
+void generalRectInit(GeneralRect *ctx, GeneralRectFactory *factory, float width, float height, const float color[3]) {
 
 // set up vertex data (and buffer(s)) and configure vertex attributes
 // ------------------------------------------------------------------
   float vertices[] = {
-      // positions        // colors         // texture coords
-      width,  height, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, // top right
-      width, -height, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, // bottom right
-      -width, -height, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, // bottom left
-      -width,  height, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f  // top left
+      // positions     // colors                     // texture coords
+      width,  height,  0.0f, color[0], color[1], color[2], 1.0f, 1.0f, // top right
+      width, -height,  0.0f, color[0], color[1], color[2], 1.0f, 0.0f, // bottom right
+      -width, -height, 0.0f, color[0], color[1], color[2], 0.0f, 0.0f, // bottom left
+      -width,  height, 0.0f, color[0], color[1], color[2], 0.0f, 1.0f  // top left
   };
   unsigned int indices[] = {
       0, 1, 3, // first triangle
@@ -100,6 +107,7 @@ const float STAR_LARGE_TICK_DISTANCE = 0.002f;
 const float STAR_SMALL_SIZE = .003f;
 const float STAR_MEDIUM_SIZE = .004f;
 const float STAR_LARGE_SIZE = .005;
+const float* STAR_COLOR = COLOR_WHITE;
 
 typedef struct {
   float x, y;
@@ -176,8 +184,10 @@ typedef struct {
   GeneralRect rect;
 } StarMesh;
 
+
+
 void starMeshInit(StarMesh *mesh, GeneralRectFactory *f, float size) {
-  generalRectInit(&mesh->rect, f, size, size);
+  generalRectInit(&mesh->rect, f, size, size, STAR_COLOR);
 }
 
 typedef struct {
@@ -254,7 +264,10 @@ typedef struct {
   bool moveRight = false;
   bool moveUp = false;
   bool moveDown = false;
-  bool fireOnce = false;
+
+  bool continueFiring = false;
+  uint16_t fireDelayTicks = 0;
+
   // render
   GeneralRect rect;
 } Ship;
@@ -267,8 +280,10 @@ typedef struct {
 } ShipLaserShot;
 
 typedef struct { // just flies straight and shoots periodically
+  //model
   Point position;
-
+  // render
+  GeneralRect rect;
 } EnemyShip;
 
 typedef struct {
@@ -312,6 +327,8 @@ const float SHIP_MIN_X = -1 + (SHIP_WIDTH / 2);
 const float SHIP_MAX_X = 1 - (SHIP_WIDTH / 2);
 const float SHIP_MIN_Y = -1 + (SHIP_HEIGHT / 2);
 const float SHIP_MAX_Y = 1 - (SHIP_HEIGHT / 2);
+const float SHIP_FIRE_DELAY_TICKS = 13;
+const float* SHIP_COLOR = COLOR_LIGHT_GREY;
 
 thread_local Game *gameRef;
 
@@ -331,9 +348,12 @@ void shipUpdateFn(Game *game, Object *obj) {
     ship->position.x += SHIP_MOVE_SPEED;
   }
 
-  if (ship->fireOnce) {
-    shipLaserShotCreate(gameRef, ship->position.x , ship->position.y + 0.10f);
-    ship->fireOnce = false;
+  if (ship->fireDelayTicks > 0) {
+    ship->fireDelayTicks--;
+  }
+  if (ship->continueFiring && ship->fireDelayTicks == 0) {
+    shipLaserShotCreate(gameRef, ship->position.x, ship->position.y + 0.10f);
+    ship->fireDelayTicks = SHIP_FIRE_DELAY_TICKS;
   }
 }
 
@@ -346,7 +366,7 @@ void shipCreate(Game* game, float x, float y) {
 
   Ship ship;
   ship.position = {x, y, 0};
-  generalRectInit(&ship.rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2);
+  generalRectInit(&ship.rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2, SHIP_COLOR);
 
   Object *obj = new Object;
   obj->id = game->objectIdCounter++;
@@ -361,9 +381,10 @@ void shipCreate(Game* game, float x, float y) {
 
 // ship laser shot
 
-const float SHIP_LASER_SHOT_MOVE_SPEED = .009f;
-const float SHIP_LASER_SHOT_WIDTH = 0.01f;
+const float SHIP_LASER_SHOT_MOVE_SPEED = .02f;
+const float SHIP_LASER_SHOT_WIDTH = 0.008f;
 const float SHIP_LASER_SHOT_HEIGHT = 0.04f;
+const float* SHIP_LASER_SHOT_COLOR = COLOR_YELLOW;
 
 void shipLaserShotDestroy(Game *game, Object *obj);
 
@@ -387,7 +408,7 @@ void shipLaserShotCreate(Game *game, float x, float y) {
 
   ShipLaserShot shot;
   shot.position = {x, y, 0};
-  generalRectInit(&shot.rect, game->f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT);
+  generalRectInit(&shot.rect, game->f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT, SHIP_LASER_SHOT_COLOR);
 
   Object *obj = new Object;
   obj->id = game->objectIdCounter++;
@@ -417,6 +438,46 @@ void shipLaserShotDestroy(Game *game, Object *obj) {
   delete obj;
 }
 
+// enemy ship
+
+const float ENEMY_SHIP_MOVE_SPEED = .009f;
+const float ENEMY_SHIP_WIDTH = 0.08f;
+const float ENEMY_SHIP_HEIGHT = 0.16f;
+const float ENEMY_SHIP_MIN_X = -1 + (ENEMY_SHIP_WIDTH / 2);
+const float ENEMY_SHIP_MAX_X = 1 - (ENEMY_SHIP_WIDTH / 2);
+const float ENEMY_SHIP_MIN_Y = -1 + (ENEMY_SHIP_HEIGHT / 2);
+const float ENEMY_SHIP_MAX_Y = 1 - (ENEMY_SHIP_HEIGHT / 2);
+const float ENEMY_SHIP_FIRE_DELAY_TICKS = 13;
+const float* ENEMY_SHIP_COLOR = COLOR_GREEN;
+
+void enemyShipUpdateFn(Game *game, Object *obj) {
+  EnemyShip *enemy = &obj->enemyShip;
+
+}
+
+void enemyShipRenderFn(Game *game, Object *obj) {
+  EnemyShip *enemy = &obj->enemyShip;
+  generalRectRender(&enemy->rect, enemy->position.x, enemy->position.y);
+}
+
+void enemyShipCreate(Game* game, float x, float y) {
+
+  EnemyShip enemy;
+  enemy.position = {x, y, 0};
+  generalRectInit(&enemy.rect, game->f, ENEMY_SHIP_WIDTH / 2, ENEMY_SHIP_HEIGHT / 2, ENEMY_SHIP_COLOR);
+
+  Object *obj = new Object;
+  obj->id = game->objectIdCounter++;
+  obj->type = O_ENEMY_SHIP;
+  obj->enemyShip = enemy;
+  obj->updateFn = enemyShipUpdateFn;
+  obj->renderFn = enemyShipRenderFn;
+
+  game->objects.push_back(obj);
+  game->ship = game->objects.at(0);
+}
+
+
 // top-level game //////////////////
 
 void gameInit(Game *game) {
@@ -428,6 +489,8 @@ void gameInit(Game *game) {
   starsRendererInit(&game->starsRenderer, game->f);
 
   shipCreate(game, 0, -0.75);
+
+  enemyShipCreate(game, 0, 0.75);
 }
 
 void gameTick(Game *game) {
@@ -499,10 +562,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     case GLFW_KEY_SPACE:
       if (action == GLFW_PRESS) {
-        gameRef->ship->ship.fireOnce = true;
+        gameRef->ship->ship.continueFiring = true;
       }
       else if (action == GLFW_RELEASE) {
-//        gameRef->ship->ship.moveRight= false;
+        gameRef->ship->ship.continueFiring = false;
       }
       else {
         // ignore repeats
@@ -562,3 +625,4 @@ int main() {
     glfwSwapBuffers(window);
   }
 }
+
