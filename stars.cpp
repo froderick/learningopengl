@@ -21,7 +21,15 @@ typedef struct {
   Shader *shader;
 } GeneralRect;
 
-void generalRectInit(GeneralRect *ctx, float width, float height) {
+typedef struct {
+  Shader *shader;
+} GeneralRectFactory;
+
+void generalRectFactoryInit(GeneralRectFactory *f) {
+  f->shader = new Shader("stars.vert", "stars.frag");
+}
+
+void generalRectInit(GeneralRect *ctx, GeneralRectFactory *factory, float width, float height) {
 
 // set up vertex data (and buffer(s)) and configure vertex attributes
 // ------------------------------------------------------------------
@@ -58,7 +66,7 @@ void generalRectInit(GeneralRect *ctx, float width, float height) {
   glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (6 * sizeof(float)));
   glEnableVertexAttribArray(2);
 
-  ctx->shader = new Shader("stars.vert", "stars.frag");
+  ctx->shader = factory->shader;
 }
 
 void generalRectRender(GeneralRect *rect, float x, float y) {
@@ -168,8 +176,8 @@ typedef struct {
   GeneralRect rect;
 } StarMesh;
 
-void starMeshInit(StarMesh *mesh, float size) {
-  generalRectInit(&mesh->rect, size, size);
+void starMeshInit(StarMesh *mesh, GeneralRectFactory *f, float size) {
+  generalRectInit(&mesh->rect, f, size, size);
 }
 
 typedef struct {
@@ -177,11 +185,11 @@ typedef struct {
   Shader *shader;
 } StarsRenderer;
 
-void starsRendererInit(StarsRenderer *r) {
-  starMeshInit(&r->meshSmall, STAR_SMALL_SIZE);
-  starMeshInit(&r->meshMedium, STAR_MEDIUM_SIZE);
-  starMeshInit(&r->meshLarge, STAR_LARGE_SIZE);
-  r->shader = new Shader("stars.vert", "stars.frag");
+void starsRendererInit(StarsRenderer *r, GeneralRectFactory *f) {
+  starMeshInit(&r->meshSmall, f, STAR_SMALL_SIZE);
+  starMeshInit(&r->meshMedium, f, STAR_MEDIUM_SIZE);
+  starMeshInit(&r->meshLarge, f, STAR_LARGE_SIZE);
+  r->shader = f->shader;
 }
 
 void starsRender(Stars *stars, StarsRenderer *r) {
@@ -189,7 +197,8 @@ void starsRender(Stars *stars, StarsRenderer *r) {
   r->shader->use();
   unsigned int transformLoc = glGetUniformLocation(r->shader->ID, "transform");
 
-  for (Star s : stars->stars) {
+  for (uint64_t i=0; i<stars->stars.size(); i++) {
+    Star s = stars->stars.at(i);
 
     glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
     transform = glm::translate(transform, glm::vec3(s.x, s.y, 0.0f));
@@ -236,10 +245,12 @@ typedef void (*RenderFn)(Object *obj, void* context);
 typedef struct {
   Point position;
 
-  bool moveLeft;
-  bool moveRight;
-  bool moveUp;
-  bool moveDown;
+  bool moveLeft = false;
+  bool moveRight = false;
+  bool moveUp = false;
+  bool moveDown = false;
+
+  bool fireOnce = false;
 
 } Ship;
 
@@ -262,7 +273,7 @@ struct Object {
   uint64_t id;
   ObjType type;
   union {
-    Ship ship;
+    Ship ship{};
     ShipLaserShot shipLaserShot;
     EnemyShip enemyShip;
     EnemyShipLaserShot enemyShipLaserShot;
@@ -273,16 +284,31 @@ struct Object {
 };
 
 typedef struct {
-} Objects;
+  GeneralRectFactory *f;
 
-// game object update code
+  Stars stars;
+  StarsRenderer starsRenderer;
+
+  uint64_t objectIdCounter = 0;
+  std::vector<Object*> objects;
+  Object *ship;
+
+} Game;
+
+
+void shipLaserShotCreate(Game *game, float x, float y);
+
+// ship
 
 const float SHIP_MOVE_SPEED = .009f;
 const float SHIP_WIDTH = 0.04f;
 const float SHIP_HEIGHT = 0.08f;
 
+thread_local Game *gameRef;
+
 void shipUpdateFn(Object *obj) {
   Ship *ship = &obj->ship;
+
   if (ship->moveUp) {
     ship->position.y += SHIP_MOVE_SPEED;
   }
@@ -295,16 +321,19 @@ void shipUpdateFn(Object *obj) {
   if (ship->moveRight) {
     ship->position.x += SHIP_MOVE_SPEED;
   }
-}
 
-// render ship
+  if (ship->fireOnce) {
+    shipLaserShotCreate(gameRef, ship->position.x , ship->position.y + 0.10f);
+    ship->fireOnce = false;
+  }
+}
 
 typedef struct {
   GeneralRect rect;
 } ShipRenderContext;
 
-void shipRenderContextInit(ShipRenderContext *ctx) {
-  generalRectInit(&ctx->rect, SHIP_WIDTH, SHIP_HEIGHT);
+void shipRenderContextInit(ShipRenderContext *ctx, GeneralRectFactory *f) {
+  generalRectInit(&ctx->rect, f, SHIP_WIDTH, SHIP_HEIGHT);
 }
 
 void shipRender(Object *obj, void *ptr) {
@@ -313,46 +342,86 @@ void shipRender(Object *obj, void *ptr) {
   generalRectRender(&ctx->rect, ship->position.x, ship->position.y);
 }
 
-// top-level game //////////////////
+// ship laser shot
+
+const float SHIP_LASER_SHOT_MOVE_SPEED = .009f;
+const float SHIP_LASER_SHOT_WIDTH = 0.01f;
+const float SHIP_LASER_SHOT_HEIGHT = 0.04f;
+
+void shipLaserShotUpdateFn(Object *obj) {
+  ShipLaserShot *shot = &obj->shipLaserShot;
+
+  shot->position.y += SHIP_LASER_SHOT_MOVE_SPEED;
+}
 
 typedef struct {
-  Stars stars;
-  StarsRenderer starsRenderer;
+  GeneralRect rect;
+} ShipLaserShotRenderContext;
 
-  uint64_t objectIdCounter = 0;
-  std::vector<Object> objects;
-  Object *ship;
+void shipLaserShotRenderContextInit(ShipLaserShotRenderContext *ctx, GeneralRectFactory *f) {
+  generalRectInit(&ctx->rect, f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT);
+}
 
-} Game;
+void shipLaserShotRender(Object *obj, void *ptr) {
+  ShipLaserShot *shot = &obj->shipLaserShot;
+  ShipLaserShotRenderContext *ctx = (ShipLaserShotRenderContext*)ptr;
+  generalRectRender(&ctx->rect, shot->position.x, shot->position.y);
+}
 
-void gameInit(Game *game) {
-  starsInit(&game->stars);
-  starsRendererInit(&game->starsRenderer);
+void shipLaserShotCreate(Game *game, float x, float y) {
+  ShipLaserShot shot;
+  shot.position = {x, y, 0};
 
-  Ship ship;
-  ship.position = {0, -0.75, 0};
+  auto *c = new ShipLaserShotRenderContext;
+  shipLaserShotRenderContextInit(c, game->f);
 
-  ShipRenderContext *c = (ShipRenderContext*)malloc(sizeof(ShipRenderContext));
-  shipRenderContextInit(c);
-
-  Object obj;
-  obj.id = game->objectIdCounter++;
-  obj.type = O_SHIP;
-  obj.ship = ship;
-  obj.updateFn = shipUpdateFn;
-  obj.renderFn = shipRender;
-  obj.renderContext = c;
+  Object *obj = new Object;
+  obj->id = game->objectIdCounter++;
+  obj->type = O_SHIP_LASER_SHOT;
+  obj->shipLaserShot = shot;
+  obj->updateFn = shipLaserShotUpdateFn;
+  obj->renderFn = shipLaserShotRender;
+  obj->renderContext = c;
 
   game->objects.push_back(obj);
-  game->ship = &game->objects.at(0);
+}
+
+// top-level game //////////////////
+
+void gameInit(Game *game) {
+
+  game->f = new GeneralRectFactory;
+  generalRectFactoryInit(game->f);
+
+  starsInit(&game->stars);
+  starsRendererInit(&game->starsRenderer, game->f);
+
+  {
+    Ship ship;
+    ship.position = {0, -0.75, 0};
+
+    auto *c = new ShipRenderContext;
+    shipRenderContextInit(c, game->f);
+
+    Object *obj = new Object;
+    obj->id = game->objectIdCounter++;
+    obj->type = O_SHIP;
+    obj->ship = ship;
+    obj->updateFn = shipUpdateFn;
+    obj->renderFn = shipRender;
+    obj->renderContext = c;
+
+    game->objects.push_back(obj);
+    game->ship = game->objects.at(0);
+  }
 }
 
 void gameTick(Game *game) {
 
   starsTick(&game->stars);
 
-  for (uint64_t i = 0; i<game->objects.size(); i++) {
-    Object *obj = &game->objects[i];
+  for (uint64_t i=0; i<game->objects.size(); i++) {
+    Object *obj = game->objects.at(i);
     obj->updateFn(obj);
   }
 }
@@ -362,12 +431,10 @@ void gameRender(Game *game) {
   starsRender(&game->stars, &game->starsRenderer);
 
   for (uint64_t i=0; i<game->objects.size(); i++) {
-    Object *obj = &game->objects.at(i);
+    Object *obj = game->objects.at(i);
     obj->renderFn(obj, obj->renderContext);
   }
 }
-
-thread_local Game *gameRef;
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
 
@@ -417,6 +484,15 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       }
       break;
     case GLFW_KEY_SPACE:
+      if (action == GLFW_PRESS) {
+        gameRef->ship->ship.fireOnce = true;
+      }
+      else if (action == GLFW_RELEASE) {
+//        gameRef->ship->ship.moveRight= false;
+      }
+      else {
+        // ignore repeats
+      }
       break;
     default:
       break;
