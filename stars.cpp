@@ -306,24 +306,28 @@ void shipLaserShotCreate(Game *game, float x, float y);
 // ship
 
 const float SHIP_MOVE_SPEED = .009f;
-const float SHIP_WIDTH = 0.04f;
-const float SHIP_HEIGHT = 0.08f;
+const float SHIP_WIDTH = 0.08f;
+const float SHIP_HEIGHT = 0.16f;
+const float SHIP_MIN_X = -1 + (SHIP_WIDTH / 2);
+const float SHIP_MAX_X = 1 - (SHIP_WIDTH / 2);
+const float SHIP_MIN_Y = -1 + (SHIP_HEIGHT / 2);
+const float SHIP_MAX_Y = 1 - (SHIP_HEIGHT / 2);
 
 thread_local Game *gameRef;
 
 void shipUpdateFn(Game *game, Object *obj) {
   Ship *ship = &obj->ship;
 
-  if (ship->moveUp) {
-    ship->position.y += SHIP_MOVE_SPEED;
-  }
-  if (ship->moveDown) {
+  if (ship->moveDown && (ship->position.y - SHIP_MOVE_SPEED > SHIP_MIN_Y)) {
     ship->position.y -= SHIP_MOVE_SPEED;
   }
-  if (ship->moveLeft) {
+  if (ship->moveUp && (ship->position.y + SHIP_MOVE_SPEED < SHIP_MAX_Y)) {
+    ship->position.y += SHIP_MOVE_SPEED;
+  }
+  if (ship->moveLeft && (ship->position.x - SHIP_MOVE_SPEED > SHIP_MIN_X)) {
     ship->position.x -= SHIP_MOVE_SPEED;
   }
-  if (ship->moveRight) {
+  if (ship->moveRight && (ship->position.x + SHIP_MOVE_SPEED < SHIP_MAX_X)) {
     ship->position.x += SHIP_MOVE_SPEED;
   }
 
@@ -342,7 +346,7 @@ void shipCreate(Game* game, float x, float y) {
 
   Ship ship;
   ship.position = {x, y, 0};
-  generalRectInit(&ship.rect, game->f, SHIP_WIDTH, SHIP_HEIGHT);
+  generalRectInit(&ship.rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2);
 
   Object *obj = new Object;
   obj->id = game->objectIdCounter++;
