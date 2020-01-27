@@ -142,7 +142,7 @@ void starsInit(Stars *stars) {
 
     stars->stars.push_back(star);
 
-    printf("%f, %f, %u\n", x, y, size);
+//    printf("%f, %f, %u\n", x, y, size);
   }
 }
 
@@ -231,6 +231,10 @@ typedef struct {
   float x, y, z;
 } Point;
 
+bool pointIsOffScreen(Point p) {
+  return p.x < -1 || p.x > 1 || p.y < -1 || p.y > 1;
+}
+
 typedef enum {
   O_SHIP,
   O_SHIP_LASER_SHOT,
@@ -238,25 +242,28 @@ typedef enum {
   O_ENEMY_SHIP_LASER_SHOT,
 } ObjType;
 
+typedef struct Game Game;
 typedef struct Object Object;
-typedef void (*UpdateFn)(Object *obj);
-typedef void (*RenderFn)(Object *obj, void* context);
+typedef void (*UpdateFn)(Game *game, Object *obj);
+typedef void (*RenderFn)(Game *game, Object *obj);
 
 typedef struct {
+  // model
   Point position;
-
   bool moveLeft = false;
   bool moveRight = false;
   bool moveUp = false;
   bool moveDown = false;
-
   bool fireOnce = false;
-
+  // render
+  GeneralRect rect;
 } Ship;
 
 typedef struct {
+  // model
   Point position;
-
+  // render
+  GeneralRect rect;
 } ShipLaserShot;
 
 typedef struct { // just flies straight and shoots periodically
@@ -279,11 +286,10 @@ struct Object {
     EnemyShipLaserShot enemyShipLaserShot;
   };
   UpdateFn updateFn;
-  void *renderContext;
   RenderFn renderFn;
 };
 
-typedef struct {
+struct Game {
   GeneralRectFactory *f;
 
   Stars stars;
@@ -293,8 +299,7 @@ typedef struct {
   std::vector<Object*> objects;
   Object *ship;
 
-} Game;
-
+};
 
 void shipLaserShotCreate(Game *game, float x, float y);
 
@@ -306,7 +311,7 @@ const float SHIP_HEIGHT = 0.08f;
 
 thread_local Game *gameRef;
 
-void shipUpdateFn(Object *obj) {
+void shipUpdateFn(Game *game, Object *obj) {
   Ship *ship = &obj->ship;
 
   if (ship->moveUp) {
@@ -328,18 +333,26 @@ void shipUpdateFn(Object *obj) {
   }
 }
 
-typedef struct {
-  GeneralRect rect;
-} ShipRenderContext;
-
-void shipRenderContextInit(ShipRenderContext *ctx, GeneralRectFactory *f) {
-  generalRectInit(&ctx->rect, f, SHIP_WIDTH, SHIP_HEIGHT);
+void shipRenderFn(Game *game, Object *obj) {
+  Ship *ship = &obj->ship;
+  generalRectRender(&ship->rect, ship->position.x, ship->position.y);
 }
 
-void shipRender(Object *obj, void *ptr) {
-  Ship *ship = &obj->ship;
-  ShipRenderContext *ctx = (ShipRenderContext*)ptr;
-  generalRectRender(&ctx->rect, ship->position.x, ship->position.y);
+void shipCreate(Game* game, float x, float y) {
+
+  Ship ship;
+  ship.position = {x, y, 0};
+  generalRectInit(&ship.rect, game->f, SHIP_WIDTH, SHIP_HEIGHT);
+
+  Object *obj = new Object;
+  obj->id = game->objectIdCounter++;
+  obj->type = O_SHIP;
+  obj->ship = ship;
+  obj->updateFn = shipUpdateFn;
+  obj->renderFn = shipRenderFn;
+
+  game->objects.push_back(obj);
+  game->ship = game->objects.at(0);
 }
 
 // ship laser shot
@@ -348,32 +361,29 @@ const float SHIP_LASER_SHOT_MOVE_SPEED = .009f;
 const float SHIP_LASER_SHOT_WIDTH = 0.01f;
 const float SHIP_LASER_SHOT_HEIGHT = 0.04f;
 
-void shipLaserShotUpdateFn(Object *obj) {
+void shipLaserShotDestroy(Game *game, Object *obj);
+
+void shipLaserShotUpdateFn(Game *game, Object *obj) {
   ShipLaserShot *shot = &obj->shipLaserShot;
 
-  shot->position.y += SHIP_LASER_SHOT_MOVE_SPEED;
+  if (pointIsOffScreen(shot->position)) {
+    shipLaserShotDestroy(game, obj);
+  }
+  else {
+    shot->position.y += SHIP_LASER_SHOT_MOVE_SPEED;
+  }
 }
 
-typedef struct {
-  GeneralRect rect;
-} ShipLaserShotRenderContext;
-
-void shipLaserShotRenderContextInit(ShipLaserShotRenderContext *ctx, GeneralRectFactory *f) {
-  generalRectInit(&ctx->rect, f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT);
-}
-
-void shipLaserShotRender(Object *obj, void *ptr) {
+void shipLaserShotRender(Game *game, Object *obj) {
   ShipLaserShot *shot = &obj->shipLaserShot;
-  ShipLaserShotRenderContext *ctx = (ShipLaserShotRenderContext*)ptr;
-  generalRectRender(&ctx->rect, shot->position.x, shot->position.y);
+  generalRectRender(&shot->rect, shot->position.x, shot->position.y);
 }
 
 void shipLaserShotCreate(Game *game, float x, float y) {
+
   ShipLaserShot shot;
   shot.position = {x, y, 0};
-
-  auto *c = new ShipLaserShotRenderContext;
-  shipLaserShotRenderContextInit(c, game->f);
+  generalRectInit(&shot.rect, game->f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT);
 
   Object *obj = new Object;
   obj->id = game->objectIdCounter++;
@@ -381,9 +391,26 @@ void shipLaserShotCreate(Game *game, float x, float y) {
   obj->shipLaserShot = shot;
   obj->updateFn = shipLaserShotUpdateFn;
   obj->renderFn = shipLaserShotRender;
-  obj->renderContext = c;
 
   game->objects.push_back(obj);
+}
+
+void shipLaserShotDestroy(Game *game, Object *obj) {
+
+  int idx = -1;
+  for (int i=0; i<game->objects.size(); i++){
+    if (obj->id == game->objects.at(i)->id) {
+      idx = i;
+      break;
+    }
+  }
+
+  if (idx == -1) {
+    throw std::runtime_error("can't find object ID: " + std::to_string(idx));
+  }
+
+  game->objects.erase(game->objects.begin() + idx);
+  delete obj;
 }
 
 // top-level game //////////////////
@@ -396,24 +423,7 @@ void gameInit(Game *game) {
   starsInit(&game->stars);
   starsRendererInit(&game->starsRenderer, game->f);
 
-  {
-    Ship ship;
-    ship.position = {0, -0.75, 0};
-
-    auto *c = new ShipRenderContext;
-    shipRenderContextInit(c, game->f);
-
-    Object *obj = new Object;
-    obj->id = game->objectIdCounter++;
-    obj->type = O_SHIP;
-    obj->ship = ship;
-    obj->updateFn = shipUpdateFn;
-    obj->renderFn = shipRender;
-    obj->renderContext = c;
-
-    game->objects.push_back(obj);
-    game->ship = game->objects.at(0);
-  }
+  shipCreate(game, 0, -0.75);
 }
 
 void gameTick(Game *game) {
@@ -422,7 +432,7 @@ void gameTick(Game *game) {
 
   for (uint64_t i=0; i<game->objects.size(); i++) {
     Object *obj = game->objects.at(i);
-    obj->updateFn(obj);
+    obj->updateFn(game, obj);
   }
 }
 
@@ -432,7 +442,7 @@ void gameRender(Game *game) {
 
   for (uint64_t i=0; i<game->objects.size(); i++) {
     Object *obj = game->objects.at(i);
-    obj->renderFn(obj, obj->renderContext);
+    obj->renderFn(game, obj);
   }
 }
 
