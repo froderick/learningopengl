@@ -241,6 +241,12 @@ typedef struct {
   float x, y, z;
 } Point;
 
+Point randomPoint() {
+  float x = ((((float)rand()) / ((float)RAND_MAX)) * 2) - 1;
+  float y = ((((float)rand()) / ((float)RAND_MAX)) * 2) - 1;
+  return Point{x, y};
+}
+
 bool pointIsOffScreen(Point p) {
   return p.x < -1 || p.x > 1 || p.y < -1 || p.y > 1;
 }
@@ -311,6 +317,7 @@ struct Object {
   BoundingRectFn boundingRectFn;
   HandleCollisionsFn handleCollisionsFn;
   RenderFn renderFn;
+  bool destroyed = false;
 };
 
 struct Game {
@@ -470,21 +477,7 @@ void shipLaserShotCreate(Game *game, float x, float y) {
 }
 
 void shipLaserShotDestroy(Game *game, Object *obj) {
-
-  int idx = -1;
-  for (int i=0; i<game->objects.size(); i++){
-    if (obj->id == game->objects.at(i)->id) {
-      idx = i;
-      break;
-    }
-  }
-
-  if (idx == -1) {
-    throw std::runtime_error("can't find object ID: " + std::to_string(idx));
-  }
-
-  game->objects.erase(game->objects.begin() + idx);
-  delete obj;
+  obj->destroyed = true;
 }
 
 // enemy ship
@@ -550,21 +543,7 @@ void enemyShipCreate(Game* game, float x, float y) {
 }
 
 void enemyShipDestroy(Game *game, Object *obj) {
-
-  int idx = -1;
-  for (int i=0; i<game->objects.size(); i++){
-    if (obj->id == game->objects.at(i)->id) {
-      idx = i;
-      break;
-    }
-  }
-
-  if (idx == -1) {
-    throw std::runtime_error("can't find object ID: " + std::to_string(idx));
-  }
-
-  game->objects.erase(game->objects.begin() + idx);
-  delete obj;
+  obj->destroyed = true;
 }
 
 // top-level game //////////////////
@@ -594,14 +573,12 @@ std::vector<Collision> findCollisions(Game *game) {
 
   std::vector<Collision> collisions;
 
-  for (uint64_t i=0; i<game->objects.size(); i++) {
-    Object *a = game->objects.at(i);
+  for (auto a : game->objects) {
 
     if (a->boundingRectFn != NULL) {
       Rect aRect = a->boundingRectFn(game, a);
 
-      for (uint64_t j=0; j<game->objects.size(); j++) {
-        Object *b = game->objects.at(j);
+      for (auto b : game->objects) {
 
         if (a != b && b->boundingRectFn != NULL) {
           Rect bRect = b->boundingRectFn(game, b);
@@ -610,8 +587,7 @@ std::vector<Collision> findCollisions(Game *game) {
 
             // avoid duplicate collisions
             bool isDup = false;
-            for (uint64_t q=0; q<collisions.size(); i++) {
-              Collision dup = collisions.at(q);
+            for (auto dup : collisions) {
               if ((dup.a == a && dup.b == b) || (dup.a == b && dup.b == a)) {
                 isDup = true;
                 break;
@@ -637,17 +613,21 @@ void gameTick(Game *game) {
 
   starsTick(&game->stars);
 
-  for (uint64_t i=0; i<game->objects.size(); i++) {
-    Object *obj = game->objects.at(i);
+  for (auto obj : game->objects) {
     obj->updateFn(game, obj);
   }
 
   auto collisions = findCollisions(game);
 
-  for (uint64_t i=0; i<collisions.size(); i++) {
-    Collision c = collisions.at(i);
+  if (!collisions.empty()) {
+    printf("collisions: %lu\n", collisions.size());
+  }
 
-    printf("collision: %u\n", i);
+  for (auto c : collisions) {
+
+    if (c.a->destroyed || c.b->destroyed) {
+      continue; // don't process collisions with destroyed objects
+    }
 
     if (c.a->handleCollisionsFn != NULL) {
       c.a->handleCollisionsFn(game, c.a, c.b);
@@ -657,14 +637,35 @@ void gameTick(Game *game) {
       c.b->handleCollisionsFn(game, c.b, c.a);
     }
   }
+
+  for (uint64_t i=0; i<game->objects.size(); i++) {
+    Object *obj = game->objects.at(i);
+
+    if (obj->destroyed) {
+
+      int idx = -1;
+      for (int i=0; i<game->objects.size(); i++){
+        if (obj->id == game->objects.at(i)->id) {
+          idx = i;
+          break;
+        }
+      }
+
+      if (idx == -1) {
+        throw std::runtime_error("can't find object ID: " + std::to_string(idx));
+      }
+
+      game->objects.erase(game->objects.begin() + idx);
+      delete obj;
+    }
+  }
 }
 
 void gameRender(Game *game) {
 
   starsRender(&game->stars, &game->starsRenderer);
 
-  for (uint64_t i=0; i<game->objects.size(); i++) {
-    Object *obj = game->objects.at(i);
+  for (auto obj : game->objects) {
     obj->renderFn(game, obj);
   }
 }
@@ -722,6 +723,18 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       }
       else if (action == GLFW_RELEASE) {
         gameRef->ship->ship.continueFiring = false;
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    case GLFW_KEY_E:
+      if (action == GLFW_PRESS) {
+//        Point p = randomPoint();
+        enemyShipCreate(gameRef, 0, 0);
+      }
+      else if (action == GLFW_RELEASE) {
+        // ignore up
       }
       else {
         // ignore repeats
