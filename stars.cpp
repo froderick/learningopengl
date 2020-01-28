@@ -252,9 +252,16 @@ typedef enum {
   O_ENEMY_SHIP_LASER_SHOT,
 } ObjType;
 
+typedef struct {
+  float x, y;
+  float width, height;
+} Rect;
+
 typedef struct Game Game;
 typedef struct Object Object;
 typedef void (*UpdateFn)(Game *game, Object *obj);
+typedef Rect (*BoundingRectFn)(Game *game, Object *obj);
+typedef void (*HandleCollisionsFn)(Game *game, Object *obj, Object *foreignObj);
 typedef void (*RenderFn)(Game *game, Object *obj);
 
 typedef struct {
@@ -301,6 +308,8 @@ struct Object {
     EnemyShipLaserShot enemyShipLaserShot;
   };
   UpdateFn updateFn;
+  BoundingRectFn boundingRectFn;
+  HandleCollisionsFn handleCollisionsFn;
   RenderFn renderFn;
 };
 
@@ -321,12 +330,14 @@ void shipLaserShotCreate(Game *game, float x, float y);
 // ship
 
 const float SHIP_MOVE_SPEED = .009f;
-const float SHIP_WIDTH = 0.08f;
-const float SHIP_HEIGHT = 0.16f;
-const float SHIP_MIN_X = -1 + (SHIP_WIDTH / 2);
-const float SHIP_MAX_X = 1 - (SHIP_WIDTH / 2);
-const float SHIP_MIN_Y = -1 + (SHIP_HEIGHT / 2);
-const float SHIP_MAX_Y = 1 - (SHIP_HEIGHT / 2);
+const float SHIP_HALF_WIDTH = 0.04f;
+const float SHIP_HALF_HEIGHT = 0.08f;
+const float SHIP_WIDTH = SHIP_HALF_WIDTH * 2;
+const float SHIP_HEIGHT = SHIP_HALF_HEIGHT * 2;
+const float SHIP_MIN_X = -1 + SHIP_HALF_WIDTH;
+const float SHIP_MAX_X = 1 - SHIP_HALF_WIDTH;
+const float SHIP_MIN_Y = -1 + SHIP_HALF_HEIGHT;
+const float SHIP_MAX_Y = 1 - SHIP_HALF_HEIGHT;
 const float SHIP_FIRE_DELAY_TICKS = 13;
 const float* SHIP_COLOR = COLOR_LIGHT_GREY;
 
@@ -357,6 +368,21 @@ void shipUpdateFn(Game *game, Object *obj) {
   }
 }
 
+Rect shipBoundingRectFn(Game *game, Object *obj) {
+  Ship *ship = &obj->ship;
+  Rect rect = {
+      .x = ship->position.x - SHIP_HALF_WIDTH,
+      .y = ship->position.y + SHIP_HALF_HEIGHT,
+      .width = SHIP_WIDTH,
+      .height = SHIP_HEIGHT
+  };
+  return rect;
+}
+
+void shipHandleCollisionsFn(Game *game, Object *obj, Object *foreignObj) {
+
+}
+
 void shipRenderFn(Game *game, Object *obj) {
   Ship *ship = &obj->ship;
   generalRectRender(&ship->rect, ship->position.x, ship->position.y);
@@ -373,6 +399,8 @@ void shipCreate(Game* game, float x, float y) {
   obj->type = O_SHIP;
   obj->ship = ship;
   obj->updateFn = shipUpdateFn;
+  obj->boundingRectFn = shipBoundingRectFn;
+  obj->handleCollisionsFn = shipHandleCollisionsFn;
   obj->renderFn = shipRenderFn;
 
   game->objects.push_back(obj);
@@ -382,8 +410,10 @@ void shipCreate(Game* game, float x, float y) {
 // ship laser shot
 
 const float SHIP_LASER_SHOT_MOVE_SPEED = .02f;
-const float SHIP_LASER_SHOT_WIDTH = 0.008f;
-const float SHIP_LASER_SHOT_HEIGHT = 0.04f;
+const float SHIP_LASER_SHOT_HALF_WIDTH = 0.004f;
+const float SHIP_LASER_SHOT_HALF_HEIGHT = 0.02f;
+const float SHIP_LASER_SHOT_WIDTH = SHIP_LASER_SHOT_HALF_WIDTH * 2;
+const float SHIP_LASER_SHOT_HEIGHT = SHIP_LASER_SHOT_HALF_HEIGHT * 2;
 const float* SHIP_LASER_SHOT_COLOR = COLOR_YELLOW;
 
 void shipLaserShotDestroy(Game *game, Object *obj);
@@ -396,6 +426,23 @@ void shipLaserShotUpdateFn(Game *game, Object *obj) {
   }
   else {
     shot->position.y += SHIP_LASER_SHOT_MOVE_SPEED;
+  }
+}
+
+Rect shipLaserShotBoundingRectFn(Game *game, Object *obj) {
+  ShipLaserShot *shot = &obj->shipLaserShot;
+  Rect rect = {
+    .x = shot->position.x - SHIP_LASER_SHOT_HALF_WIDTH,
+    .y = shot->position.y + SHIP_LASER_SHOT_HALF_HEIGHT,
+    .width = SHIP_LASER_SHOT_WIDTH,
+    .height = SHIP_LASER_SHOT_HEIGHT,
+  };
+  return rect;
+}
+
+void shipLaserShotHandleCollisionsFn(Game *game, Object *obj, Object *foreignObj) {
+  if (foreignObj->type == O_ENEMY_SHIP) {
+    shipLaserShotDestroy(game, obj);
   }
 }
 
@@ -415,6 +462,8 @@ void shipLaserShotCreate(Game *game, float x, float y) {
   obj->type = O_SHIP_LASER_SHOT;
   obj->shipLaserShot = shot;
   obj->updateFn = shipLaserShotUpdateFn;
+  obj->boundingRectFn = shipLaserShotBoundingRectFn;
+  obj->handleCollisionsFn = shipLaserShotHandleCollisionsFn;
   obj->renderFn = shipLaserShotRender;
 
   game->objects.push_back(obj);
@@ -440,19 +489,40 @@ void shipLaserShotDestroy(Game *game, Object *obj) {
 
 // enemy ship
 
+void enemyShipDestroy(Game *game, Object *obj);
+
 const float ENEMY_SHIP_MOVE_SPEED = .009f;
-const float ENEMY_SHIP_WIDTH = 0.08f;
-const float ENEMY_SHIP_HEIGHT = 0.16f;
-const float ENEMY_SHIP_MIN_X = -1 + (ENEMY_SHIP_WIDTH / 2);
-const float ENEMY_SHIP_MAX_X = 1 - (ENEMY_SHIP_WIDTH / 2);
-const float ENEMY_SHIP_MIN_Y = -1 + (ENEMY_SHIP_HEIGHT / 2);
-const float ENEMY_SHIP_MAX_Y = 1 - (ENEMY_SHIP_HEIGHT / 2);
+const float ENEMY_SHIP_HALF_WIDTH = 0.04f;
+const float ENEMY_SHIP_HALF_HEIGHT = 0.08f;
+const float ENEMY_SHIP_WIDTH = ENEMY_SHIP_HALF_WIDTH * 2;
+const float ENEMY_SHIP_HEIGHT = ENEMY_SHIP_HALF_HEIGHT * 2;
+const float ENEMY_SHIP_MIN_X = -1 + ENEMY_SHIP_HALF_WIDTH;
+const float ENEMY_SHIP_MAX_X = 1 - ENEMY_SHIP_HALF_WIDTH;
+const float ENEMY_SHIP_MIN_Y = -1 + ENEMY_SHIP_HALF_HEIGHT;
+const float ENEMY_SHIP_MAX_Y = 1 - ENEMY_SHIP_HALF_HEIGHT;
 const float ENEMY_SHIP_FIRE_DELAY_TICKS = 13;
 const float* ENEMY_SHIP_COLOR = COLOR_GREEN;
 
 void enemyShipUpdateFn(Game *game, Object *obj) {
   EnemyShip *enemy = &obj->enemyShip;
 
+}
+
+Rect enemyShipBoundingRectFn(Game *game, Object *obj) {
+  EnemyShip *enemy = &obj->enemyShip;
+  Rect rect = {
+      .x = enemy->position.x - ENEMY_SHIP_HALF_WIDTH,
+      .y = enemy->position.y + ENEMY_SHIP_HALF_HEIGHT,
+      .width = ENEMY_SHIP_WIDTH,
+      .height = ENEMY_SHIP_HEIGHT,
+  };
+  return rect;
+}
+
+void enemyShipHandleCollisionsFn(Game *game, Object *obj, Object *foreignObj) {
+  if (foreignObj->type == O_SHIP_LASER_SHOT) {
+    enemyShipDestroy(game, obj);
+  }
 }
 
 void enemyShipRenderFn(Game *game, Object *obj) {
@@ -471,12 +541,31 @@ void enemyShipCreate(Game* game, float x, float y) {
   obj->type = O_ENEMY_SHIP;
   obj->enemyShip = enemy;
   obj->updateFn = enemyShipUpdateFn;
+  obj->boundingRectFn = enemyShipBoundingRectFn;
+  obj->handleCollisionsFn = enemyShipHandleCollisionsFn;
   obj->renderFn = enemyShipRenderFn;
 
   game->objects.push_back(obj);
   game->ship = game->objects.at(0);
 }
 
+void enemyShipDestroy(Game *game, Object *obj) {
+
+  int idx = -1;
+  for (int i=0; i<game->objects.size(); i++){
+    if (obj->id == game->objects.at(i)->id) {
+      idx = i;
+      break;
+    }
+  }
+
+  if (idx == -1) {
+    throw std::runtime_error("can't find object ID: " + std::to_string(idx));
+  }
+
+  game->objects.erase(game->objects.begin() + idx);
+  delete obj;
+}
 
 // top-level game //////////////////
 
@@ -493,6 +582,57 @@ void gameInit(Game *game) {
   enemyShipCreate(game, 0, 0.75);
 }
 
+typedef struct {
+  Object *a, *b;
+} Collision;
+
+bool collides(Rect a, Rect b) {
+  return (a.x + a.width) > b.x && a.x < (b.x + b.width) && (a.y - a.height) < b.y && a.y > (b.y - b.height);
+}
+
+std::vector<Collision> findCollisions(Game *game) {
+
+  std::vector<Collision> collisions;
+
+  for (uint64_t i=0; i<game->objects.size(); i++) {
+    Object *a = game->objects.at(i);
+
+    if (a->boundingRectFn != NULL) {
+      Rect aRect = a->boundingRectFn(game, a);
+
+      for (uint64_t j=0; j<game->objects.size(); j++) {
+        Object *b = game->objects.at(j);
+
+        if (a != b && b->boundingRectFn != NULL) {
+          Rect bRect = b->boundingRectFn(game, b);
+
+          if (collides(aRect, bRect)) {
+
+            // avoid duplicate collisions
+            bool isDup = false;
+            for (uint64_t q=0; q<collisions.size(); i++) {
+              Collision dup = collisions.at(q);
+              if ((dup.a == a && dup.b == b) || (dup.a == b && dup.b == a)) {
+                isDup = true;
+                break;
+              }
+            }
+
+            if (!isDup) {
+              Collision c;
+              c.a = a;
+              c.b = b;
+              collisions.push_back(c);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return collisions;
+}
+
 void gameTick(Game *game) {
 
   starsTick(&game->stars);
@@ -500,6 +640,22 @@ void gameTick(Game *game) {
   for (uint64_t i=0; i<game->objects.size(); i++) {
     Object *obj = game->objects.at(i);
     obj->updateFn(game, obj);
+  }
+
+  auto collisions = findCollisions(game);
+
+  for (uint64_t i=0; i<collisions.size(); i++) {
+    Collision c = collisions.at(i);
+
+    printf("collision: %u\n", i);
+
+    if (c.a->handleCollisionsFn != NULL) {
+      c.a->handleCollisionsFn(game, c.a, c.b);
+    }
+
+    if (c.b->handleCollisionsFn != NULL) {
+      c.b->handleCollisionsFn(game, c.b, c.a);
+    }
   }
 }
 
