@@ -548,19 +548,6 @@ void enemyShipDestroy(Game *game, Object *obj) {
 
 // top-level game //////////////////
 
-void gameInit(Game *game) {
-
-  game->f = new GeneralRectFactory;
-  generalRectFactoryInit(game->f);
-
-  starsInit(&game->stars);
-  starsRendererInit(&game->starsRenderer, game->f);
-
-  shipCreate(game, 0, -0.75);
-
-  enemyShipCreate(game, 0, 0.75);
-}
-
 typedef struct {
   Object *a, *b;
 } Collision;
@@ -607,6 +594,19 @@ std::vector<Collision> findCollisions(Game *game) {
   }
 
   return collisions;
+}
+
+void gameInit(Game *game) {
+
+  game->f = new GeneralRectFactory;
+  generalRectFactoryInit(game->f);
+
+  starsInit(&game->stars);
+  starsRendererInit(&game->starsRenderer, game->f);
+
+  shipCreate(game, 0, -0.75);
+
+  enemyShipCreate(game, 0, 0.75);
 }
 
 void gameTick(Game *game) {
