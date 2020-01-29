@@ -251,6 +251,13 @@ bool pointIsOffScreen(Point p) {
   return p.x < -1 || p.x > 1 || p.y < -1 || p.y > 1;
 }
 
+typedef struct {
+  float x, y;
+  float width, height;
+} Rect;
+
+struct Game;
+
 typedef enum {
   O_SHIP,
   O_SHIP_LASER_SHOT,
@@ -258,81 +265,109 @@ typedef enum {
   O_ENEMY_SHIP_LASER_SHOT,
 } ObjType;
 
-typedef struct {
-  float x, y;
-  float width, height;
-} Rect;
+struct Object {
+  uint64_t id;
+  ObjType type;
+  std::vector<Rect> boundingRects;
+  bool destroyed = false;
 
-typedef struct Game Game;
-typedef struct Object Object;
-typedef void (*UpdateFn)(Game *game, Object *obj);
-typedef Rect (*BoundingRectFn)(Game *game, Object *obj);
-typedef void (*HandleCollisionsFn)(Game *game, Object *obj, Object *foreignObj);
-typedef void (*RenderFn)(Game *game, Object *obj);
+  Object(uint64_t id, ObjType type) {
+    this->id = id;
+    this->type = type;
+  }
+  virtual ~Object() = default;
 
-typedef struct {
-  // model
-  Point position;
+  bool isa(ObjType type) {
+    return this->type == type;
+  }
+
+  virtual void update(Game *game) = 0;
+  virtual void handleCollision(Game *game, Object *foreignObj) = 0;
+  virtual void render(Game *game) = 0;
+};
+
+struct Ship : Object {
+  Point position{};
   bool moveLeft = false;
   bool moveRight = false;
   bool moveUp = false;
   bool moveDown = false;
-
   bool continueFiring = false;
   uint16_t fireDelayTicks = 0;
+  GeneralRect rect{};
 
-  // render
-  GeneralRect rect;
-} Ship;
+  Ship(uint64_t id, Point position, GeneralRect rect): Object(id, O_SHIP) {
+    this->position = position;
+    this->rect = rect;
+  }
 
-typedef struct {
-  // model
+  static Ship* get(Object *obj) {
+    if (!obj->isa(O_SHIP)) {
+      throw std::runtime_error("not a ship");
+    }
+    return (Ship*)obj;
+  }
+
+  static void create(Game *game, Point p);
+  void update(Game *game) override;
+  void handleCollision(Game *game, Object *foreignObj) override;
+  void render(Game *game) override;
+  void destroy(Game *game);
+};
+
+struct ShipLaserShot : Object {
   Point position;
-  // render
   GeneralRect rect;
-} ShipLaserShot;
+  ShipLaserShot(uint64_t id, Point position, GeneralRect rect): Object(id, O_SHIP_LASER_SHOT) {
+    this->position = position;
+    this->rect = rect;
+  }
 
-typedef struct { // just flies straight and shoots periodically
-  //model
+  static void create(Game *game, Point p);
+  void update(Game *game) override;
+  void handleCollision(Game *game, Object *foreignObj) override;
+  void render(Game *game) override;
+  void destroy(Game *game);
+};
+
+struct EnemyShip : Object { // just flies straight and shoots periodically
   Point position;
-  // render
   GeneralRect rect;
-} EnemyShip;
+  EnemyShip(uint64_t id, Point position, GeneralRect rect): Object(id, O_ENEMY_SHIP) {
+    this->position = position;
+    this->rect = rect;
+  }
 
-typedef struct {
+  static void create(Game *game, Point p);
+  void update(Game *game) override;
+  void handleCollision(Game *game, Object *foreignObj) override;
+  void render(Game *game) override;
+  void destroy(Game *game);
+};
+
+struct EnemyShipLaserShot : Object {
   Point position;
+  GeneralRect rect;
+  EnemyShipLaserShot(uint64_t id, Point position, GeneralRect rect): Object(id, O_ENEMY_SHIP_LASER_SHOT) {
+    this->position = position;
+    this->rect = rect;
+  }
 
-} EnemyShipLaserShot;
-
-struct Object {
-  uint64_t id;
-  ObjType type;
-  union {
-    Ship ship{};
-    ShipLaserShot shipLaserShot;
-    EnemyShip enemyShip;
-    EnemyShipLaserShot enemyShipLaserShot;
-  };
-  UpdateFn updateFn;
-  BoundingRectFn boundingRectFn;
-  HandleCollisionsFn handleCollisionsFn;
-  RenderFn renderFn;
-  bool destroyed = false;
+  static void create(Game *game, Point p);
+  void update(Game *game) override;
+  void handleCollision(Game *game, Object *foreignObj) override;
+  void render(Game *game) override;
+  void destroy(Game *game);
 };
 
 struct Game {
   GeneralRectFactory *f;
-
   Stars stars;
   StarsRenderer starsRenderer;
-
   uint64_t objectIdCounter = 0;
   std::vector<Object*> objects;
-  Object *ship;
-
+  Ship *ship;
 };
-
-void shipLaserShotCreate(Game *game, float x, float y);
 
 // ship
 
@@ -348,10 +383,19 @@ const float SHIP_MAX_Y = 1 - SHIP_HALF_HEIGHT;
 const float SHIP_FIRE_DELAY_TICKS = 13;
 const float* SHIP_COLOR = COLOR_LIGHT_GREY;
 
-thread_local Game *gameRef;
+void Ship::create(Game *game, Point p) {
 
-void shipUpdateFn(Game *game, Object *obj) {
-  Ship *ship = &obj->ship;
+  GeneralRect rect;
+  generalRectInit(&rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2, SHIP_COLOR);
+
+  Ship *ship = new Ship(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
+  game->objects.push_back(ship);
+  game->ship = ship;
+}
+
+void Ship::update(Game *game) {
+
+  Ship* ship = this;
 
   if (ship->moveDown && (ship->position.y - SHIP_MOVE_SPEED > SHIP_MIN_Y)) {
     ship->position.y -= SHIP_MOVE_SPEED;
@@ -370,48 +414,29 @@ void shipUpdateFn(Game *game, Object *obj) {
     ship->fireDelayTicks--;
   }
   if (ship->continueFiring && ship->fireDelayTicks == 0) {
-    shipLaserShotCreate(gameRef, ship->position.x, ship->position.y + 0.10f);
+    ShipLaserShot::create(game, {.x = ship->position.x, .y = ship->position.y + 0.10f});
     ship->fireDelayTicks = SHIP_FIRE_DELAY_TICKS;
   }
-}
 
-Rect shipBoundingRectFn(Game *game, Object *obj) {
-  Ship *ship = &obj->ship;
+  boundingRects.clear();
   Rect rect = {
       .x = ship->position.x - SHIP_HALF_WIDTH,
       .y = ship->position.y + SHIP_HALF_HEIGHT,
       .width = SHIP_WIDTH,
       .height = SHIP_HEIGHT
   };
-  return rect;
+  boundingRects.push_back(rect);
 }
 
-void shipHandleCollisionsFn(Game *game, Object *obj, Object *foreignObj) {
-
+void Ship::handleCollision(Game *game, Object *foreignObj) {
 }
 
-void shipRenderFn(Game *game, Object *obj) {
-  Ship *ship = &obj->ship;
-  generalRectRender(&ship->rect, ship->position.x, ship->position.y);
+void Ship::render(Game *game) {
+  generalRectRender(&this->rect, this->position.x, this->position.y);
 }
 
-void shipCreate(Game* game, float x, float y) {
-
-  Ship ship;
-  ship.position = {x, y, 0};
-  generalRectInit(&ship.rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2, SHIP_COLOR);
-
-  Object *obj = new Object;
-  obj->id = game->objectIdCounter++;
-  obj->type = O_SHIP;
-  obj->ship = ship;
-  obj->updateFn = shipUpdateFn;
-  obj->boundingRectFn = shipBoundingRectFn;
-  obj->handleCollisionsFn = shipHandleCollisionsFn;
-  obj->renderFn = shipRenderFn;
-
-  game->objects.push_back(obj);
-  game->ship = game->objects.at(0);
+void Ship::destroy(Game *game) {
+  this->destroyed = true;
 }
 
 // ship laser shot
@@ -423,62 +448,48 @@ const float SHIP_LASER_SHOT_WIDTH = SHIP_LASER_SHOT_HALF_WIDTH * 2;
 const float SHIP_LASER_SHOT_HEIGHT = SHIP_LASER_SHOT_HALF_HEIGHT * 2;
 const float* SHIP_LASER_SHOT_COLOR = COLOR_YELLOW;
 
-void shipLaserShotDestroy(Game *game, Object *obj);
+void ShipLaserShot::create(Game *game, Point p) {
+  GeneralRect rect;
+  generalRectInit(&rect, game->f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT, SHIP_LASER_SHOT_COLOR);
+  auto *shot = new ShipLaserShot(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
+  game->objects.push_back(shot);
+}
 
-void shipLaserShotUpdateFn(Game *game, Object *obj) {
-  ShipLaserShot *shot = &obj->shipLaserShot;
+void ShipLaserShot::update(Game *game) {
 
-  if (pointIsOffScreen(shot->position)) {
-    shipLaserShotDestroy(game, obj);
+  if (pointIsOffScreen(this->position)) {
+    destroy(game);
   }
   else {
-    shot->position.y += SHIP_LASER_SHOT_MOVE_SPEED;
+    this->position.y += SHIP_LASER_SHOT_MOVE_SPEED;
   }
-}
 
-Rect shipLaserShotBoundingRectFn(Game *game, Object *obj) {
-  ShipLaserShot *shot = &obj->shipLaserShot;
+  boundingRects.clear();
   Rect rect = {
-    .x = shot->position.x - SHIP_LASER_SHOT_HALF_WIDTH,
-    .y = shot->position.y + SHIP_LASER_SHOT_HALF_HEIGHT,
-    .width = SHIP_LASER_SHOT_WIDTH,
-    .height = SHIP_LASER_SHOT_HEIGHT,
+      .x = this->position.x - SHIP_LASER_SHOT_HALF_WIDTH,
+      .y = this->position.y + SHIP_LASER_SHOT_HALF_HEIGHT,
+      .width = SHIP_LASER_SHOT_WIDTH,
+      .height = SHIP_LASER_SHOT_HEIGHT,
   };
-  return rect;
+  boundingRects.push_back(rect);
 }
 
-void shipLaserShotHandleCollisionsFn(Game *game, Object *obj, Object *foreignObj) {
+void ShipLaserShot::handleCollision(Game *game, Object *foreignObj) {
   if (foreignObj->type == O_ENEMY_SHIP) {
-    shipLaserShotDestroy(game, obj);
+    destroy(game);
   }
 }
 
-void shipLaserShotRender(Game *game, Object *obj) {
-  ShipLaserShot *shot = &obj->shipLaserShot;
-  generalRectRender(&shot->rect, shot->position.x, shot->position.y);
+void ShipLaserShot::render(Game *game) {
+  generalRectRender(&this->rect, this->position.x, this->position.y);
 }
 
-void shipLaserShotCreate(Game *game, float x, float y) {
-
-  ShipLaserShot shot;
-  shot.position = {x, y, 0};
-  generalRectInit(&shot.rect, game->f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT, SHIP_LASER_SHOT_COLOR);
-
-  Object *obj = new Object;
-  obj->id = game->objectIdCounter++;
-  obj->type = O_SHIP_LASER_SHOT;
-  obj->shipLaserShot = shot;
-  obj->updateFn = shipLaserShotUpdateFn;
-  obj->boundingRectFn = shipLaserShotBoundingRectFn;
-  obj->handleCollisionsFn = shipLaserShotHandleCollisionsFn;
-  obj->renderFn = shipLaserShotRender;
-
-  game->objects.push_back(obj);
+void ShipLaserShot::destroy(Game *game) {
+  this->destroyed = true;
 }
 
-void shipLaserShotDestroy(Game *game, Object *obj) {
-  obj->destroyed = true;
-}
+
+thread_local Game *gameRef;
 
 // enemy ship
 
@@ -496,54 +507,39 @@ const float ENEMY_SHIP_MAX_Y = 1 - ENEMY_SHIP_HALF_HEIGHT;
 const float ENEMY_SHIP_FIRE_DELAY_TICKS = 13;
 const float* ENEMY_SHIP_COLOR = COLOR_GREEN;
 
-void enemyShipUpdateFn(Game *game, Object *obj) {
-  EnemyShip *enemy = &obj->enemyShip;
+void EnemyShip::create(Game *game, Point p) {
 
+  GeneralRect rect;
+  generalRectInit(&rect, game->f, ENEMY_SHIP_WIDTH / 2, ENEMY_SHIP_HEIGHT / 2, ENEMY_SHIP_COLOR);
+
+  EnemyShip *ship = new EnemyShip(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
+  game->objects.push_back(ship);
 }
 
-Rect enemyShipBoundingRectFn(Game *game, Object *obj) {
-  EnemyShip *enemy = &obj->enemyShip;
+void EnemyShip::update(Game *game) {
+
+  boundingRects.clear();
   Rect rect = {
-      .x = enemy->position.x - ENEMY_SHIP_HALF_WIDTH,
-      .y = enemy->position.y + ENEMY_SHIP_HALF_HEIGHT,
+      .x = this->position.x - ENEMY_SHIP_HALF_WIDTH,
+      .y = this->position.y + ENEMY_SHIP_HALF_HEIGHT,
       .width = ENEMY_SHIP_WIDTH,
       .height = ENEMY_SHIP_HEIGHT,
   };
-  return rect;
+  boundingRects.push_back(rect);
 }
 
-void enemyShipHandleCollisionsFn(Game *game, Object *obj, Object *foreignObj) {
+void EnemyShip::handleCollision(Game *game, Object *foreignObj) {
   if (foreignObj->type == O_SHIP_LASER_SHOT) {
-    enemyShipDestroy(game, obj);
+    destroy(game);
   }
 }
 
-void enemyShipRenderFn(Game *game, Object *obj) {
-  EnemyShip *enemy = &obj->enemyShip;
-  generalRectRender(&enemy->rect, enemy->position.x, enemy->position.y);
+void EnemyShip::render(Game *game) {
+  generalRectRender(&this->rect, this->position.x, this->position.y);
 }
 
-void enemyShipCreate(Game* game, float x, float y) {
-
-  EnemyShip enemy;
-  enemy.position = {x, y, 0};
-  generalRectInit(&enemy.rect, game->f, ENEMY_SHIP_WIDTH / 2, ENEMY_SHIP_HEIGHT / 2, ENEMY_SHIP_COLOR);
-
-  Object *obj = new Object;
-  obj->id = game->objectIdCounter++;
-  obj->type = O_ENEMY_SHIP;
-  obj->enemyShip = enemy;
-  obj->updateFn = enemyShipUpdateFn;
-  obj->boundingRectFn = enemyShipBoundingRectFn;
-  obj->handleCollisionsFn = enemyShipHandleCollisionsFn;
-  obj->renderFn = enemyShipRenderFn;
-
-  game->objects.push_back(obj);
-  game->ship = game->objects.at(0);
-}
-
-void enemyShipDestroy(Game *game, Object *obj) {
-  obj->destroyed = true;
+void EnemyShip::destroy(Game *game) {
+  this->destroyed = true;
 }
 
 // top-level game //////////////////
@@ -561,31 +557,28 @@ std::vector<Collision> findCollisions(Game *game) {
   std::vector<Collision> collisions;
 
   for (auto a : game->objects) {
+    for (auto b : game->objects) {
+      if (a != b) {
+        for (Rect aRect : a->boundingRects) {
+          for (Rect bRect : b->boundingRects) {
 
-    if (a->boundingRectFn != NULL) {
-      Rect aRect = a->boundingRectFn(game, a);
+            if (collides(aRect, bRect)) {
 
-      for (auto b : game->objects) {
-
-        if (a != b && b->boundingRectFn != NULL) {
-          Rect bRect = b->boundingRectFn(game, b);
-
-          if (collides(aRect, bRect)) {
-
-            // avoid duplicate collisions
-            bool isDup = false;
-            for (auto dup : collisions) {
-              if ((dup.a == a && dup.b == b) || (dup.a == b && dup.b == a)) {
-                isDup = true;
-                break;
+              // avoid duplicate collisions
+              bool isDup = false;
+              for (auto dup : collisions) {
+                if ((dup.a == a && dup.b == b) || (dup.a == b && dup.b == a)) {
+                  isDup = true;
+                  break;
+                }
               }
-            }
 
-            if (!isDup) {
-              Collision c;
-              c.a = a;
-              c.b = b;
-              collisions.push_back(c);
+              if (!isDup) {
+                Collision c;
+                c.a = a;
+                c.b = b;
+                collisions.push_back(c);
+              }
             }
           }
         }
@@ -604,9 +597,8 @@ void gameInit(Game *game) {
   starsInit(&game->stars);
   starsRendererInit(&game->starsRenderer, game->f);
 
-  shipCreate(game, 0, -0.75);
-
-  enemyShipCreate(game, 0, 0.75);
+  Ship::create(game, {.x = 0, .y = -0.75});
+  EnemyShip::create(game, {.x = 0, .y = 0.75});
 }
 
 void gameTick(Game *game) {
@@ -614,7 +606,7 @@ void gameTick(Game *game) {
   starsTick(&game->stars);
 
   for (auto obj : game->objects) {
-    obj->updateFn(game, obj);
+    obj->update(game);
   }
 
   auto collisions = findCollisions(game);
@@ -629,13 +621,9 @@ void gameTick(Game *game) {
       continue; // don't process collisions with destroyed objects
     }
 
-    if (c.a->handleCollisionsFn != NULL) {
-      c.a->handleCollisionsFn(game, c.a, c.b);
-    }
+    c.a->handleCollision(game, c.b);
 
-    if (c.b->handleCollisionsFn != NULL) {
-      c.b->handleCollisionsFn(game, c.b, c.a);
-    }
+    c.b->handleCollision(game, c.a);
   }
 
   for (uint64_t i=0; i<game->objects.size(); i++) {
@@ -666,7 +654,7 @@ void gameRender(Game *game) {
   starsRender(&game->stars, &game->starsRenderer);
 
   for (auto obj : game->objects) {
-    obj->renderFn(game, obj);
+    obj->render(game);
   }
 }
 
@@ -675,10 +663,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
   switch (key) {
     case GLFW_KEY_UP:
       if (action == GLFW_PRESS) {
-        gameRef->ship->ship.moveUp = true;
+        gameRef->ship->moveUp = true;
       }
       else if (action == GLFW_RELEASE) {
-        gameRef->ship->ship.moveUp = false;
+        gameRef->ship->moveUp = false;
       }
       else {
         // ignore repeats
@@ -686,10 +674,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     case GLFW_KEY_DOWN:
       if (action == GLFW_PRESS) {
-        gameRef->ship->ship.moveDown= true;
+        gameRef->ship->moveDown= true;
       }
       else if (action == GLFW_RELEASE) {
-        gameRef->ship->ship.moveDown= false;
+        gameRef->ship->moveDown= false;
       }
       else {
         // ignore repeats
@@ -697,10 +685,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     case GLFW_KEY_LEFT:
       if (action == GLFW_PRESS) {
-        gameRef->ship->ship.moveLeft= true;
+        gameRef->ship->moveLeft= true;
       }
       else if (action == GLFW_RELEASE) {
-        gameRef->ship->ship.moveLeft= false;
+        gameRef->ship->moveLeft= false;
       }
       else {
         // ignore repeats
@@ -708,10 +696,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     case GLFW_KEY_RIGHT:
       if (action == GLFW_PRESS) {
-        gameRef->ship->ship.moveRight= true;
+        gameRef->ship->moveRight= true;
       }
       else if (action == GLFW_RELEASE) {
-        gameRef->ship->ship.moveRight= false;
+        gameRef->ship->moveRight= false;
       }
       else {
         // ignore repeats
@@ -719,10 +707,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     case GLFW_KEY_SPACE:
       if (action == GLFW_PRESS) {
-        gameRef->ship->ship.continueFiring = true;
+        gameRef->ship->continueFiring = true;
       }
       else if (action == GLFW_RELEASE) {
-        gameRef->ship->ship.continueFiring = false;
+        gameRef->ship->continueFiring = false;
       }
       else {
         // ignore repeats
@@ -731,7 +719,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
     case GLFW_KEY_E:
       if (action == GLFW_PRESS) {
 //        Point p = randomPoint();
-        enemyShipCreate(gameRef, 0, 0);
+        EnemyShip::create(gameRef, {.x = 0, .y = 0});
       }
       else if (action == GLFW_RELEASE) {
         // ignore up
