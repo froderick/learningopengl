@@ -16,12 +16,23 @@
  * general rectangle
  */
 
-const float COLOR_RED       [3] = {1.0f, 0.0f, 0.0f};
-const float COLOR_GREEN     [3] = {0.0f, 1.0f, 0.0f};
-const float COLOR_BLUE      [3] = {0.0f, 0.0f, 1.0f};
-const float COLOR_WHITE     [3] = {1.0f, 1.0f, 1.0f};
-const float COLOR_YELLOW    [3] = {1.0f, 1.0f, 0.0f};
-const float COLOR_LIGHT_GREY[3] = {0.8f, 0.8f, 0.8f};
+// TODO: just put the goddamn parameters somewhere not globalqq
+
+struct Color {
+  float r = 0, g = 0, b = 0;
+  Color(float r, float g, float b) {
+    this->r = r;
+    this->g = g;
+    this->b = b;
+  }
+};
+
+const Color COLOR_RED        (1.0f, 0.0f, 0.0f);
+const Color COLOR_GREEN      (0.0f, 1.0f, 0.0f);
+const Color COLOR_BLUE       (0.0f, 0.0f, 1.0f);
+const Color COLOR_WHITE      (1.0f, 1.0f, 1.0f);
+const Color COLOR_YELLOW     (1.0f, 1.0f, 0.0f);
+const Color COLOR_LIGHT_GREY (0.8f, 0.8f, 0.8f);
 
 typedef struct {
   unsigned int VBO, VAO, EBO;
@@ -36,16 +47,16 @@ void generalRectFactoryInit(GeneralRectFactory *f) {
   f->shader = new Shader("stars.vert", "stars.frag");
 }
 
-void generalRectInit(GeneralRect *ctx, GeneralRectFactory *factory, float width, float height, const float color[3]) {
+void generalRectInit(GeneralRect *ctx, GeneralRectFactory *factory, float width, float height, Color color) {
 
 // set up vertex data (and buffer(s)) and configure vertex attributes
 // ------------------------------------------------------------------
   float vertices[] = {
-      // positions     // colors                     // texture coords
-      width,  height,  0.0f, color[0], color[1], color[2], 1.0f, 1.0f, // top right
-      width, -height,  0.0f, color[0], color[1], color[2], 1.0f, 0.0f, // bottom right
-      -width, -height, 0.0f, color[0], color[1], color[2], 0.0f, 0.0f, // bottom left
-      -width,  height, 0.0f, color[0], color[1], color[2], 0.0f, 1.0f  // top left
+      // positions            // colors                 // texture coords
+      width,  height,  0.0f, color.r, color.g, color.b, 1.0f, 1.0f, // top right
+      width, -height,  0.0f, color.r, color.g, color.b, 1.0f, 0.0f, // bottom right
+      -width, -height, 0.0f, color.r, color.g, color.b, 0.0f, 0.0f, // bottom left
+      -width,  height, 0.0f, color.r, color.g, color.b, 0.0f, 1.0f  // top left
   };
   unsigned int indices[] = {
       0, 1, 3, // first triangle
@@ -93,21 +104,21 @@ void generalRectRender(GeneralRect *rect, float x, float y) {
  * stars
  */
 
-const uint64_t STAR_COUNT = 600;
-const uint8_t STAR_TYPE_SMALL = 1;
-const uint8_t STAR_TYPE_MEDIUM = 2;
-const uint8_t STAR_TYPE_LARGE = 3;
+static const uint64_t STAR_COUNT = 600;
+static const uint8_t STAR_TYPE_SMALL = 1;
+static const uint8_t STAR_TYPE_MEDIUM = 2;
+static const uint8_t STAR_TYPE_LARGE = 3;
 // these three are percentages, they must add up to 1
-const float STAR_SMALL_WEGHT = 0.70;
-const float STAR_MEDIUM_WEGHT = 0.25;
-const float STAR_LARGE_WEGHT = 0.5;
-const float STAR_SMALL_TICK_DISTANCE = 0.001f;
-const float STAR_MEDIUM_TICK_DISTANCE = 0.0015f;
-const float STAR_LARGE_TICK_DISTANCE = 0.002f;
-const float STAR_SMALL_SIZE = .003f;
-const float STAR_MEDIUM_SIZE = .004f;
-const float STAR_LARGE_SIZE = .005;
-const float* STAR_COLOR = COLOR_WHITE;
+static const float STAR_SMALL_WEGHT = 0.70;
+static const float STAR_MEDIUM_WEGHT = 0.25;
+static const float STAR_LARGE_WEGHT = 0.5;
+static const float STAR_SMALL_TICK_DISTANCE = 0.001f;
+static const float STAR_MEDIUM_TICK_DISTANCE = 0.0015f;
+static const float STAR_LARGE_TICK_DISTANCE = 0.002f;
+static const float STAR_SMALL_SIZE = .003f;
+static const float STAR_MEDIUM_SIZE = .004f;
+static const float STAR_LARGE_SIZE = .005;
+static const Color STAR_COLOR = COLOR_WHITE;
 
 typedef struct {
   float x, y;
@@ -263,6 +274,7 @@ typedef enum {
   O_SHIP_LASER_SHOT,
   O_ENEMY_SHIP,
   O_ENEMY_SHIP_LASER_SHOT,
+  O_LASER_POWER_UP,
 } ObjType;
 
 struct Object {
@@ -287,6 +299,18 @@ struct Object {
 };
 
 struct Ship : Object {
+
+  static constexpr float MOVE_SPEED = .009f;
+  static constexpr float HALF_WIDTH = 0.04f;
+  static constexpr float HALF_HEIGHT = 0.08f;
+  static constexpr float WIDTH = HALF_WIDTH * 2;
+  static constexpr float HEIGHT = HALF_HEIGHT * 2;
+  static constexpr float MIN_X = -1 + HALF_WIDTH;
+  static constexpr float MAX_X = 1 - HALF_WIDTH;
+  static constexpr float MIN_Y = -1 + HALF_HEIGHT;
+  static constexpr float MAX_Y = 1 - HALF_HEIGHT;
+  static constexpr float FIRE_DELAY_TICKS = 8;
+
   Point position{};
   bool moveLeft = false;
   bool moveRight = false;
@@ -294,6 +318,8 @@ struct Ship : Object {
   bool moveDown = false;
   bool continueFiring = false;
   uint16_t fireDelayTicks = 0;
+  uint16_t numLaserPowerupsCollected = 0;
+
   GeneralRect rect{};
 
   Ship(uint64_t id, Point position, GeneralRect rect): Object(id, O_SHIP) {
@@ -316,6 +342,13 @@ struct Ship : Object {
 };
 
 struct ShipLaserShot : Object {
+
+  static constexpr float MOVE_SPEED = .02f;
+  static constexpr float HALF_WIDTH = 0.004f;
+  static constexpr float HALF_HEIGHT = 0.02f;
+  static constexpr float WIDTH = HALF_WIDTH * 2;
+  static constexpr float HEIGHT = HALF_HEIGHT * 2;
+
   Point position;
   GeneralRect rect;
   ShipLaserShot(uint64_t id, Point position, GeneralRect rect): Object(id, O_SHIP_LASER_SHOT) {
@@ -331,7 +364,20 @@ struct ShipLaserShot : Object {
 };
 
 struct EnemyShip : Object { // just flies straight and shoots periodically
+
+  static constexpr float MOVE_SPEED = .005f;
+  static constexpr float HALF_WIDTH = 0.03f;
+  static constexpr float HALF_HEIGHT = 0.06f;
+  static constexpr float WIDTH = HALF_WIDTH * 2;
+  static constexpr float HEIGHT = HALF_HEIGHT * 2;
+  static constexpr float MIN_X = -1 + HALF_WIDTH;
+  static constexpr float MAX_X = 1 - HALF_WIDTH;
+  static constexpr float MIN_Y = -1 + HALF_HEIGHT;
+  static constexpr float MAX_Y = 1 - HALF_HEIGHT;
+  static constexpr float FIRE_DELAY_TICKS = 300;
+
   Point position;
+  uint16_t fireDelayTicks = 0;
   GeneralRect rect;
   EnemyShip(uint64_t id, Point position, GeneralRect rect): Object(id, O_ENEMY_SHIP) {
     this->position = position;
@@ -346,9 +392,50 @@ struct EnemyShip : Object { // just flies straight and shoots periodically
 };
 
 struct EnemyShipLaserShot : Object {
+
+  static constexpr float MOVE_SPEED = .02f;
+  static constexpr float HALF_WIDTH = 0.003f;
+  static constexpr float HALF_HEIGHT = 0.01f;
+  static constexpr float WIDTH = HALF_WIDTH * 2;
+  static constexpr float HEIGHT = HALF_HEIGHT * 2;
+
   Point position;
   GeneralRect rect;
   EnemyShipLaserShot(uint64_t id, Point position, GeneralRect rect): Object(id, O_ENEMY_SHIP_LASER_SHOT) {
+    this->position = position;
+    this->rect = rect;
+  }
+
+  static void create(Game *game, Point p);
+  void update(Game *game) override;
+  void handleCollision(Game *game, Object *foreignObj) override;
+  void render(Game *game) override;
+  void destroy(Game *game);
+};
+
+struct LaserPowerUp : Object {
+
+  static constexpr float MOVE_SPEED = .009f;
+  static constexpr float HALF_WIDTH = 0.03f;
+  static constexpr float HALF_HEIGHT = 0.03f;
+  static constexpr float WIDTH = HALF_WIDTH * 2;
+  static constexpr float HEIGHT = HALF_HEIGHT * 2;
+  static constexpr float MIN_X = -1 + HALF_WIDTH;
+  static constexpr float MAX_X = 1 - HALF_WIDTH;
+  static constexpr float MIN_Y = -1 + HALF_HEIGHT;
+  static constexpr float MAX_Y = 1 - HALF_HEIGHT;
+  static constexpr float FIRE_DELAY_TICKS = 8;
+
+  Point position{};
+  bool moveLeft = false;
+  bool moveRight = false;
+  bool moveUp = false;
+  bool moveDown = false;
+  bool continueFiring = false;
+  uint16_t fireDelayTicks = 0;
+  GeneralRect rect{};
+
+  LaserPowerUp(uint64_t id, Point position, GeneralRect rect) : Object(id, O_LASER_POWER_UP) {
     this->position = position;
     this->rect = rect;
   }
@@ -371,22 +458,10 @@ struct Game {
 
 // ship
 
-const float SHIP_MOVE_SPEED = .009f;
-const float SHIP_HALF_WIDTH = 0.04f;
-const float SHIP_HALF_HEIGHT = 0.08f;
-const float SHIP_WIDTH = SHIP_HALF_WIDTH * 2;
-const float SHIP_HEIGHT = SHIP_HALF_HEIGHT * 2;
-const float SHIP_MIN_X = -1 + SHIP_HALF_WIDTH;
-const float SHIP_MAX_X = 1 - SHIP_HALF_WIDTH;
-const float SHIP_MIN_Y = -1 + SHIP_HALF_HEIGHT;
-const float SHIP_MAX_Y = 1 - SHIP_HALF_HEIGHT;
-const float SHIP_FIRE_DELAY_TICKS = 13;
-const float* SHIP_COLOR = COLOR_LIGHT_GREY;
-
 void Ship::create(Game *game, Point p) {
 
   GeneralRect rect;
-  generalRectInit(&rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2, SHIP_COLOR);
+  generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_LIGHT_GREY);
 
   Ship *ship = new Ship(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
   game->objects.push_back(ship);
@@ -397,38 +472,63 @@ void Ship::update(Game *game) {
 
   Ship* ship = this;
 
-  if (ship->moveDown && (ship->position.y - SHIP_MOVE_SPEED > SHIP_MIN_Y)) {
-    ship->position.y -= SHIP_MOVE_SPEED;
+  if (ship->moveDown && (ship->position.y - MOVE_SPEED > MIN_Y)) {
+    ship->position.y -= MOVE_SPEED;
   }
-  if (ship->moveUp && (ship->position.y + SHIP_MOVE_SPEED < SHIP_MAX_Y)) {
-    ship->position.y += SHIP_MOVE_SPEED;
+  if (ship->moveUp && (ship->position.y + MOVE_SPEED < MAX_Y)) {
+    ship->position.y += MOVE_SPEED;
   }
-  if (ship->moveLeft && (ship->position.x - SHIP_MOVE_SPEED > SHIP_MIN_X)) {
-    ship->position.x -= SHIP_MOVE_SPEED;
+  if (ship->moveLeft && (ship->position.x - MOVE_SPEED > MIN_X)) {
+    ship->position.x -= MOVE_SPEED;
   }
-  if (ship->moveRight && (ship->position.x + SHIP_MOVE_SPEED < SHIP_MAX_X)) {
-    ship->position.x += SHIP_MOVE_SPEED;
+  if (ship->moveRight && (ship->position.x + MOVE_SPEED < MAX_X)) {
+    ship->position.x += MOVE_SPEED;
   }
 
   if (ship->fireDelayTicks > 0) {
     ship->fireDelayTicks--;
   }
   if (ship->continueFiring && ship->fireDelayTicks == 0) {
-    ShipLaserShot::create(game, {.x = ship->position.x, .y = ship->position.y + 0.10f});
-    ship->fireDelayTicks = SHIP_FIRE_DELAY_TICKS;
+
+    // fire
+    switch (numLaserPowerupsCollected) {
+      case 0:
+        ShipLaserShot::create(game, {.x = ship->position.x, .y = ship->position.y + 0.10f});
+        break;
+      case 1:
+        ShipLaserShot::create(game, {.x = ship->position.x - 0.02f, .y = ship->position.y + 0.10f});
+        ShipLaserShot::create(game, {.x = ship->position.x + 0.02f, .y = ship->position.y + 0.10f});
+        break;
+      default:
+        ShipLaserShot::create(game, {.x = ship->position.x - 0.04f, .y = ship->position.y + 0.10f});
+        ShipLaserShot::create(game, {.x = ship->position.x, .y = ship->position.y + 0.10f});
+        ShipLaserShot::create(game, {.x = ship->position.x + 0.04f, .y = ship->position.y + 0.10f});
+        break;
+    }
+    ship->fireDelayTicks = FIRE_DELAY_TICKS;
+
   }
 
   boundingRects.clear();
   Rect rect = {
-      .x = ship->position.x - SHIP_HALF_WIDTH,
-      .y = ship->position.y + SHIP_HALF_HEIGHT,
-      .width = SHIP_WIDTH,
-      .height = SHIP_HEIGHT
+      .x = ship->position.x - HALF_WIDTH,
+      .y = ship->position.y + HALF_HEIGHT,
+      .width = WIDTH,
+      .height = HEIGHT
   };
   boundingRects.push_back(rect);
 }
 
 void Ship::handleCollision(Game *game, Object *foreignObj) {
+  if (foreignObj->isa(O_ENEMY_SHIP_LASER_SHOT)) {
+    this->destroy(game);
+  }
+  else if (foreignObj->type == O_ENEMY_SHIP) {
+    this->destroy(game);
+  }
+  else if (foreignObj->type == O_LASER_POWER_UP) {
+    this->numLaserPowerupsCollected++;
+  }
 }
 
 void Ship::render(Game *game) {
@@ -441,16 +541,9 @@ void Ship::destroy(Game *game) {
 
 // ship laser shot
 
-const float SHIP_LASER_SHOT_MOVE_SPEED = .02f;
-const float SHIP_LASER_SHOT_HALF_WIDTH = 0.004f;
-const float SHIP_LASER_SHOT_HALF_HEIGHT = 0.02f;
-const float SHIP_LASER_SHOT_WIDTH = SHIP_LASER_SHOT_HALF_WIDTH * 2;
-const float SHIP_LASER_SHOT_HEIGHT = SHIP_LASER_SHOT_HALF_HEIGHT * 2;
-const float* SHIP_LASER_SHOT_COLOR = COLOR_YELLOW;
-
 void ShipLaserShot::create(Game *game, Point p) {
   GeneralRect rect;
-  generalRectInit(&rect, game->f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT, SHIP_LASER_SHOT_COLOR);
+  generalRectInit(&rect, game->f, WIDTH, HEIGHT, COLOR_YELLOW);
   auto *shot = new ShipLaserShot(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
   game->objects.push_back(shot);
 }
@@ -458,18 +551,18 @@ void ShipLaserShot::create(Game *game, Point p) {
 void ShipLaserShot::update(Game *game) {
 
   if (pointIsOffScreen(this->position)) {
-    destroy(game);
+    this->destroy(game);
   }
   else {
-    this->position.y += SHIP_LASER_SHOT_MOVE_SPEED;
+    this->position.y += MOVE_SPEED;
   }
 
   boundingRects.clear();
   Rect rect = {
-      .x = this->position.x - SHIP_LASER_SHOT_HALF_WIDTH,
-      .y = this->position.y + SHIP_LASER_SHOT_HALF_HEIGHT,
-      .width = SHIP_LASER_SHOT_WIDTH,
-      .height = SHIP_LASER_SHOT_HEIGHT,
+      .x = this->position.x - HALF_WIDTH,
+      .y = this->position.y + HALF_HEIGHT,
+      .width = WIDTH,
+      .height = HEIGHT,
   };
   boundingRects.push_back(rect);
 }
@@ -488,49 +581,48 @@ void ShipLaserShot::destroy(Game *game) {
   this->destroyed = true;
 }
 
-
-thread_local Game *gameRef;
-
 // enemy ship
 
-void enemyShipDestroy(Game *game, Object *obj);
-
-const float ENEMY_SHIP_MOVE_SPEED = .009f;
-const float ENEMY_SHIP_HALF_WIDTH = 0.04f;
-const float ENEMY_SHIP_HALF_HEIGHT = 0.08f;
-const float ENEMY_SHIP_WIDTH = ENEMY_SHIP_HALF_WIDTH * 2;
-const float ENEMY_SHIP_HEIGHT = ENEMY_SHIP_HALF_HEIGHT * 2;
-const float ENEMY_SHIP_MIN_X = -1 + ENEMY_SHIP_HALF_WIDTH;
-const float ENEMY_SHIP_MAX_X = 1 - ENEMY_SHIP_HALF_WIDTH;
-const float ENEMY_SHIP_MIN_Y = -1 + ENEMY_SHIP_HALF_HEIGHT;
-const float ENEMY_SHIP_MAX_Y = 1 - ENEMY_SHIP_HALF_HEIGHT;
-const float ENEMY_SHIP_FIRE_DELAY_TICKS = 13;
-const float* ENEMY_SHIP_COLOR = COLOR_GREEN;
-
 void EnemyShip::create(Game *game, Point p) {
-
   GeneralRect rect;
-  generalRectInit(&rect, game->f, ENEMY_SHIP_WIDTH / 2, ENEMY_SHIP_HEIGHT / 2, ENEMY_SHIP_COLOR);
-
+  generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_GREEN);
   EnemyShip *ship = new EnemyShip(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
   game->objects.push_back(ship);
 }
 
 void EnemyShip::update(Game *game) {
+  EnemyShip *ship = this;
+
+  if (ship->position.y < (-1 - HEIGHT)) {
+    this->destroy(game);
+  }
+  else {
+    ship->position.y -= MOVE_SPEED;
+  }
+
+  if (ship->fireDelayTicks > 0) {
+    ship->fireDelayTicks--;
+  }
+  if (ship->fireDelayTicks == 0) {
+    EnemyShipLaserShot::create(game, {.x = ship->position.x, .y = ship->position.y - 0.10f});
+    ship->fireDelayTicks = FIRE_DELAY_TICKS;
+  }
 
   boundingRects.clear();
-  Rect rect = {
-      .x = this->position.x - ENEMY_SHIP_HALF_WIDTH,
-      .y = this->position.y + ENEMY_SHIP_HALF_HEIGHT,
-      .width = ENEMY_SHIP_WIDTH,
-      .height = ENEMY_SHIP_HEIGHT,
-  };
-  boundingRects.push_back(rect);
+  boundingRects.push_back({
+    .x = this->position.x - HALF_WIDTH,
+    .y = this->position.y + HALF_HEIGHT,
+    .width = WIDTH,
+    .height = HEIGHT,
+  });
 }
 
 void EnemyShip::handleCollision(Game *game, Object *foreignObj) {
   if (foreignObj->type == O_SHIP_LASER_SHOT) {
-    destroy(game);
+    this->destroy(game);
+  }
+  else if (foreignObj->type == O_SHIP) {
+    this->destroy(game);
   }
 }
 
@@ -539,6 +631,91 @@ void EnemyShip::render(Game *game) {
 }
 
 void EnemyShip::destroy(Game *game) {
+  this->destroyed = true;
+}
+
+// enemy ship laser shot
+
+void EnemyShipLaserShot::create(Game *game, Point p) {
+  GeneralRect rect;
+  generalRectInit(&rect, game->f, WIDTH, HEIGHT, COLOR_RED);
+  auto *shot = new EnemyShipLaserShot(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
+  game->objects.push_back(shot);
+}
+
+void EnemyShipLaserShot::update(Game *game) {
+
+  if (pointIsOffScreen(this->position)) {
+    this->destroy(game);
+  }
+  else {
+    this->position.y -= MOVE_SPEED;
+  }
+
+  boundingRects.clear();
+  boundingRects.push_back({
+    .x = this->position.x - HALF_WIDTH,
+    .y = this->position.y + HALF_HEIGHT,
+    .width = WIDTH,
+    .height = HEIGHT,
+  });
+}
+
+void EnemyShipLaserShot::handleCollision(Game *game, Object *foreignObj) {
+  if (foreignObj->type == O_SHIP) {
+    this->destroy(game);
+  }
+}
+
+void EnemyShipLaserShot::render(Game *game) {
+  generalRectRender(&this->rect, this->position.x, this->position.y);
+}
+
+void EnemyShipLaserShot::destroy(Game *game) {
+  this->destroyed = true;
+}
+
+// laser power up
+
+void LaserPowerUp::create(Game *game, Point p) {
+  GeneralRect rect;
+  generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_BLUE);
+  LaserPowerUp *up=  new LaserPowerUp(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
+  game->objects.push_back(up);
+}
+
+void LaserPowerUp::update(Game *game) {
+
+  LaserPowerUp* up = this;
+
+  if (up->position.y < (-1 - HEIGHT)) {
+    this->destroy(game);
+  }
+  else {
+    up->position.y -= MOVE_SPEED;
+  }
+
+  boundingRects.clear();
+  Rect rect = {
+      .x = up->position.x - HALF_WIDTH,
+      .y = up->position.y + HALF_HEIGHT,
+      .width = WIDTH,
+      .height = HEIGHT
+  };
+  boundingRects.push_back(rect);
+}
+
+void LaserPowerUp::handleCollision(Game *game, Object *foreignObj) {
+  if (foreignObj->type == O_SHIP) {
+    this->destroy(game);
+  }
+}
+
+void LaserPowerUp::render(Game *game) {
+  generalRectRender(&this->rect, this->position.x, this->position.y);
+}
+
+void LaserPowerUp::destroy(Game *game) {
   this->destroyed = true;
 }
 
@@ -605,7 +782,10 @@ void gameTick(Game *game) {
 
   starsTick(&game->stars);
 
-  for (auto obj : game->objects) {
+  // using an index for iterating here, since objects can create more objects on update(),
+  // meaning that the vector could reallocate and invalidate the iterator pointer
+  for (uint64_t i=0; i<game->objects.size(); i++) {
+    Object *obj = game->objects.at(i);
     obj->update(game);
   }
 
@@ -616,47 +796,64 @@ void gameTick(Game *game) {
   }
 
   for (auto c : collisions) {
-
     if (c.a->destroyed || c.b->destroyed) {
       continue; // don't process collisions with destroyed objects
     }
-
     c.a->handleCollision(game, c.b);
-
     c.b->handleCollision(game, c.a);
   }
 
-  for (uint64_t i=0; i<game->objects.size(); i++) {
-    Object *obj = game->objects.at(i);
-
-    if (obj->destroyed) {
-
-      int idx = -1;
-      for (int i=0; i<game->objects.size(); i++){
-        if (obj->id == game->objects.at(i)->id) {
-          idx = i;
-          break;
-        }
-      }
-
-      if (idx == -1) {
-        throw std::runtime_error("can't find object ID: " + std::to_string(idx));
-      }
-
-      game->objects.erase(game->objects.begin() + idx);
+  for (auto it = game->objects.begin(); it!=game->objects.end(); ) {
+    if ((*it)->destroyed) {
+      Object *obj = *it;
+      it = game->objects.erase(it);
       delete obj;
     }
+    else {
+      ++it;
+    }
+  }
+
+  printf("objects: %lu\n", game->objects.size());
+
+  float enemySpawnChance = (((float)rand()) / ((float)RAND_MAX));
+  if (enemySpawnChance < 0.018f) {
+    Point p = randomPoint();
+    if (p.x < EnemyShip::MIN_X) {
+      p.x = EnemyShip::MIN_X;
+    }
+    else if (p.x > EnemyShip::MAX_X) {
+      p.x = EnemyShip::MAX_X;
+    }
+
+    p.y = 1 + EnemyShip::HALF_HEIGHT;
+    EnemyShip::create(game, p);
+  }
+
+  float upChance = (((float)rand()) / ((float)RAND_MAX));
+  if (upChance < 0.010f) {
+    Point p = randomPoint();
+    if (p.x < LaserPowerUp::MIN_X) {
+      p.x = LaserPowerUp::MIN_X;
+    }
+    else if (p.x > LaserPowerUp::MAX_X) {
+      p.x = LaserPowerUp::MAX_X;
+    }
+
+    p.y = 1 + LaserPowerUp::HALF_HEIGHT;
+    LaserPowerUp::create(game, p);
   }
 }
 
 void gameRender(Game *game) {
-
   starsRender(&game->stars, &game->starsRenderer);
-
   for (auto obj : game->objects) {
     obj->render(game);
   }
 }
+
+// only used by window-driven callbacks with no context passed through
+thread_local Game *gameRef;
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
 
@@ -718,8 +915,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     case GLFW_KEY_E:
       if (action == GLFW_PRESS) {
-//        Point p = randomPoint();
-        EnemyShip::create(gameRef, {.x = 0, .y = 0});
+        Ship::create(gameRef, {.x = 0, .y = -0.75});
       }
       else if (action == GLFW_RELEASE) {
         // ignore up
