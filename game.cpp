@@ -33,6 +33,7 @@ const Color COLOR_BLUE       (0.0f, 0.0f, 1.0f);
 const Color COLOR_WHITE      (1.0f, 1.0f, 1.0f);
 const Color COLOR_YELLOW     (1.0f, 1.0f, 0.0f);
 const Color COLOR_LIGHT_GREY (0.8f, 0.8f, 0.8f);
+const Color COLOR_PURPLE     (0.580f, 0.000f, 0.827f);
 
 typedef struct {
   unsigned int VBO, VAO, EBO;
@@ -44,7 +45,7 @@ typedef struct {
 } GeneralRectFactory;
 
 void generalRectFactoryInit(GeneralRectFactory *f) {
-  f->shader = new Shader("stars.vert", "stars.frag");
+  f->shader = new Shader("coloredrect.vert", "coloredrect.frag");
 }
 
 void generalRectInit(GeneralRect *ctx, GeneralRectFactory *factory, float width, float height, Color color) {
@@ -275,6 +276,7 @@ typedef enum {
   O_ENEMY_SHIP,
   O_ENEMY_SHIP_LASER_SHOT,
   O_LASER_POWER_UP,
+  O_SHIELD_POWER_UP,
 } ObjType;
 
 struct Object {
@@ -310,6 +312,7 @@ struct Ship : Object {
   static constexpr float MIN_Y = -1 + HALF_HEIGHT;
   static constexpr float MAX_Y = 1 - HALF_HEIGHT;
   static constexpr float FIRE_DELAY_TICKS = 8;
+  static constexpr float SHIELD_TICKS = 60 * 10;
 
   Point position{};
   bool moveLeft = false;
@@ -319,6 +322,7 @@ struct Ship : Object {
   bool continueFiring = false;
   uint16_t fireDelayTicks = 0;
   uint16_t numLaserPowerupsCollected = 0;
+  uint16_t shieldTicks = 0;
 
   GeneralRect rect{};
 
@@ -424,7 +428,6 @@ struct LaserPowerUp : Object {
   static constexpr float MAX_X = 1 - HALF_WIDTH;
   static constexpr float MIN_Y = -1 + HALF_HEIGHT;
   static constexpr float MAX_Y = 1 - HALF_HEIGHT;
-  static constexpr float FIRE_DELAY_TICKS = 8;
 
   Point position{};
   bool moveLeft = false;
@@ -447,6 +450,39 @@ struct LaserPowerUp : Object {
   void destroy(Game *game);
 };
 
+struct ShieldPowerUp : Object {
+
+  static constexpr float MOVE_SPEED = .009f;
+  static constexpr float HALF_WIDTH = 0.03f;
+  static constexpr float HALF_HEIGHT = 0.03f;
+  static constexpr float WIDTH = HALF_WIDTH * 2;
+  static constexpr float HEIGHT = HALF_HEIGHT * 2;
+  static constexpr float MIN_X = -1 + HALF_WIDTH;
+  static constexpr float MAX_X = 1 - HALF_WIDTH;
+  static constexpr float MIN_Y = -1 + HALF_HEIGHT;
+  static constexpr float MAX_Y = 1 - HALF_HEIGHT;
+
+  Point position{};
+  bool moveLeft = false;
+  bool moveRight = false;
+  bool moveUp = false;
+  bool moveDown = false;
+  bool continueFiring = false;
+  uint16_t fireDelayTicks = 0;
+  GeneralRect rect{};
+
+  ShieldPowerUp(uint64_t id, Point position, GeneralRect rect) : Object(id, O_SHIELD_POWER_UP) {
+    this->position = position;
+    this->rect = rect;
+  }
+
+  static void create(Game *game, Point p);
+  void update(Game *game) override;
+  void handleCollision(Game *game, Object *foreignObj) override;
+  void render(Game *game) override;
+  void destroy(Game *game);
+};
+
 struct Game {
   GeneralRectFactory *f;
   Stars stars;
@@ -454,6 +490,8 @@ struct Game {
   uint64_t objectIdCounter = 0;
   std::vector<Object*> objects;
   Ship *ship;
+
+//  GeneralCircle testCircle;
 };
 
 // ship
@@ -529,10 +567,17 @@ void Ship::handleCollision(Game *game, Object *foreignObj) {
   else if (foreignObj->type == O_LASER_POWER_UP) {
     this->numLaserPowerupsCollected++;
   }
+  else if (foreignObj->type == O_SHIELD_POWER_UP) {
+    this->shieldTicks = SHIELD_TICKS;
+  }
 }
 
 void Ship::render(Game *game) {
   generalRectRender(&this->rect, this->position.x, this->position.y);
+
+  if (shieldTicks > 0) {
+
+  }
 }
 
 void Ship::destroy(Game *game) {
@@ -719,6 +764,50 @@ void LaserPowerUp::destroy(Game *game) {
   this->destroyed = true;
 }
 
+// laser power up
+
+void ShieldPowerUp::create(Game *game, Point p) {
+  GeneralRect rect;
+  generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_PURPLE);
+  ShieldPowerUp *up=  new ShieldPowerUp(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
+  game->objects.push_back(up);
+}
+
+void ShieldPowerUp::update(Game *game) {
+
+  ShieldPowerUp* up = this;
+
+  if (up->position.y < (-1 - HEIGHT)) {
+    this->destroy(game);
+  }
+  else {
+    up->position.y -= MOVE_SPEED;
+  }
+
+  boundingRects.clear();
+  Rect rect = {
+      .x = up->position.x - HALF_WIDTH,
+      .y = up->position.y + HALF_HEIGHT,
+      .width = WIDTH,
+      .height = HEIGHT
+  };
+  boundingRects.push_back(rect);
+}
+
+void ShieldPowerUp::handleCollision(Game *game, Object *foreignObj) {
+  if (foreignObj->type == O_SHIP) {
+    this->destroy(game);
+  }
+}
+
+void ShieldPowerUp::render(Game *game) {
+  generalRectRender(&this->rect, this->position.x, this->position.y);
+}
+
+void ShieldPowerUp::destroy(Game *game) {
+  this->destroyed = true;
+}
+
 // top-level game //////////////////
 
 typedef struct {
@@ -776,6 +865,8 @@ void gameInit(Game *game) {
 
   Ship::create(game, {.x = 0, .y = -0.75});
   EnemyShip::create(game, {.x = 0, .y = 0.75});
+
+//  generalCircleInit(&game->testCircle);
 }
 
 void gameTick(Game *game) {
@@ -830,8 +921,8 @@ void gameTick(Game *game) {
     EnemyShip::create(game, p);
   }
 
-  float upChance = (((float)rand()) / ((float)RAND_MAX));
-  if (upChance < 0.010f) {
+  float laserUpChance = (((float)rand()) / ((float)RAND_MAX));
+  if (laserUpChance < 0.010f) {
     Point p = randomPoint();
     if (p.x < LaserPowerUp::MIN_X) {
       p.x = LaserPowerUp::MIN_X;
@@ -843,6 +934,22 @@ void gameTick(Game *game) {
     p.y = 1 + LaserPowerUp::HALF_HEIGHT;
     LaserPowerUp::create(game, p);
   }
+
+  float shieldUpChance = (((float)rand()) / ((float)RAND_MAX));
+  if (shieldUpChance < 0.010f) {
+    Point p = randomPoint();
+    if (p.x < ShieldPowerUp::MIN_X) {
+      p.x = ShieldPowerUp::MIN_X;
+    }
+    else if (p.x > ShieldPowerUp::MAX_X) {
+      p.x = ShieldPowerUp::MAX_X;
+    }
+
+    p.y = 1 + ShieldPowerUp::HALF_HEIGHT;
+    ShieldPowerUp::create(game, p);
+  }
+
+//  generalCircleRender(&game->testCircle, 0.0f, 0.0f);
 }
 
 void gameRender(Game *game) {
