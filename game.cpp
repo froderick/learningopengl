@@ -153,6 +153,9 @@ void generalCircleInit(int windowWidth, int windowHeight, GeneralCircle *ctx, fl
   glEnableVertexAttribArray(2);
 
   ctx->shader = new Shader("circle.vert", "circle.frag");
+
+  ctx->windowWidth = windowWidth;
+  ctx->windowHeight = windowHeight;
 }
 
 void generalCircleRender(GeneralCircle *c, float x, float y) {
@@ -163,6 +166,14 @@ void generalCircleRender(GeneralCircle *c, float x, float y) {
 
   glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
   transform = glm::translate(transform, glm::vec3(x , y, 0.0f));
+
+//  float ratio = (float)c->windowWidth / (float)c->windowHeight;
+//  float xVal = 1.0 * ratio;
+//  float left = -xVal;
+//  float right = xVal;
+//  float bottom = -1;
+//  float top = 1;
+//  transform = glm::ortho(left, right, bottom, top);
 
   glm::mat4 projectionM = glm::mat4(1.0);
   projectionM[1][1]  = (float)c->windowWidth/c->windowHeight; //aspect ratio
