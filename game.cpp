@@ -102,6 +102,79 @@ void generalRectRender(GeneralRect *rect, float x, float y) {
 }
 
 /*
+ * general circle
+ */
+
+struct GeneralCircle {
+  unsigned int VBO, VAO, EBO;
+  Shader *shader;
+
+  int windowWidth, windowHeight;
+};
+
+void generalCircleInit(int windowWidth, int windowHeight, GeneralCircle *ctx, float radius, Color color) {
+
+  float width = radius;
+  float height = radius;
+
+// set up vertex data (and buffer(s)) and configure vertex attributes
+// ------------------------------------------------------------------
+  float vertices[] = {
+      // positions            // colors                 // texture coords
+      width,  height,  0.0f, color.r, color.g, color.b, 1.0f, 1.0f, // top right
+      width, -height,  0.0f, color.r, color.g, color.b, 1.0f, -1.0f, // bottom right
+      -width, -height, 0.0f, color.r, color.g, color.b, -1.0f, -1.0f, // bottom left
+      -width,  height, 0.0f, color.r, color.g, color.b, -1.0f, 1.0f  // top left
+  };
+  unsigned int indices[] = {
+      0, 1, 3, // first triangle
+      1, 2, 3  // second triangle
+  };
+  glGenVertexArrays(1, &ctx->VAO);
+  glGenBuffers(1, &ctx->VBO);
+  glGenBuffers(1, &ctx->EBO);
+
+  glBindVertexArray(ctx->VAO);
+
+  glBindBuffer(GL_ARRAY_BUFFER, ctx->VBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ctx->EBO);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+// position attribute
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) 0);
+  glEnableVertexAttribArray(0);
+// color attribute
+  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (3 * sizeof(float)));
+  glEnableVertexAttribArray(1);
+// texture coord attribute
+  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (6 * sizeof(float)));
+  glEnableVertexAttribArray(2);
+
+  ctx->shader = new Shader("circle.vert", "circle.frag");
+}
+
+void generalCircleRender(GeneralCircle *c, float x, float y) {
+
+  c->shader->use();
+  unsigned int transformLoc = glGetUniformLocation(c->shader->ID, "transform");
+  unsigned int projectionLoc = glGetUniformLocation(c->shader->ID, "projection");
+
+  glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
+  transform = glm::translate(transform, glm::vec3(x , y, 0.0f));
+
+  glm::mat4 projectionM = glm::mat4(1.0);
+  projectionM[1][1]  = (float)c->windowWidth/c->windowHeight; //aspect ratio
+
+  glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(transform));
+  glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projectionM));
+
+  glBindVertexArray(c->VAO);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+}
+
+/*
  * stars
  */
 
@@ -1071,6 +1144,12 @@ int main() {
 
   glfwSetKeyCallback(window, keyCallback);
 
+  int width, height;
+  glfwGetWindowSize(window, &width, &height);
+
+  GeneralCircle c;
+  generalCircleInit(width, height, &c, 0.5f, COLOR_YELLOW);
+
   while (!glfwWindowShouldClose(window)) {
 
     glfwPollEvents();
@@ -1081,6 +1160,8 @@ int main() {
     glClear(GL_COLOR_BUFFER_BIT);
 
     gameRender(&game);
+
+    generalCircleRender(&c, 0.0f, 0.0f);
 
     glfwSwapBuffers(window);
   }
