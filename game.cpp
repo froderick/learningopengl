@@ -88,14 +88,20 @@ void generalRectInit(GeneralRect *ctx, GeneralRectFactory *factory, float width,
   ctx->shader = factory->shader;
 }
 
-void generalRectRender(GeneralRect *rect, float x, float y) {
+void generalRectRender(GeneralRect *rect, float x, float y, float aspectRatio) {
 
   rect->shader->use();
   unsigned int transformLoc = glGetUniformLocation(rect->shader->ID, "transform");
+  unsigned int projectionLoc = glGetUniformLocation(rect->shader->ID, "projection");
 
   glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
   transform = glm::translate(transform, glm::vec3(x , y, 0.0f));
+
+  glm::mat4 projectionM = glm::mat4(1.0);
+  projectionM[1][1]  = aspectRatio;
+
   glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(transform));
+  glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projectionM));
 
   glBindVertexArray(rect->VAO);
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -108,11 +114,9 @@ void generalRectRender(GeneralRect *rect, float x, float y) {
 struct GeneralCircle {
   unsigned int VBO, VAO, EBO;
   Shader *shader;
-
-  int windowWidth, windowHeight;
 };
 
-void generalCircleInit(int windowWidth, int windowHeight, GeneralCircle *ctx, float radius, Color color) {
+void generalCircleInit(GeneralCircle *ctx, float radius, Color color) {
 
   float width = radius;
   float height = radius;
@@ -153,12 +157,9 @@ void generalCircleInit(int windowWidth, int windowHeight, GeneralCircle *ctx, fl
   glEnableVertexAttribArray(2);
 
   ctx->shader = new Shader("circle.vert", "circle.frag");
-
-  ctx->windowWidth = windowWidth;
-  ctx->windowHeight = windowHeight;
 }
 
-void generalCircleRender(GeneralCircle *c, float x, float y) {
+void generalCircleRender(GeneralCircle *c, float x, float y, float aspectRatio) {
 
   c->shader->use();
   unsigned int transformLoc = glGetUniformLocation(c->shader->ID, "transform");
@@ -167,16 +168,8 @@ void generalCircleRender(GeneralCircle *c, float x, float y) {
   glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
   transform = glm::translate(transform, glm::vec3(x , y, 0.0f));
 
-//  float ratio = (float)c->windowWidth / (float)c->windowHeight;
-//  float xVal = 1.0 * ratio;
-//  float left = -xVal;
-//  float right = xVal;
-//  float bottom = -1;
-//  float top = 1;
-//  transform = glm::ortho(left, right, bottom, top);
-
   glm::mat4 projectionM = glm::mat4(1.0);
-  projectionM[1][1]  = (float)c->windowWidth/c->windowHeight; //aspect ratio
+  projectionM[1][1]  = aspectRatio;
 
   glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(transform));
   glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projectionM));
@@ -568,6 +561,11 @@ struct ShieldPowerUp : Object {
 };
 
 struct Game {
+
+  int windowWidth;
+  int windowHeight;
+  float aspectRatio;
+
   GeneralRectFactory *f;
   Stars stars;
   StarsRenderer starsRenderer;
@@ -657,7 +655,7 @@ void Ship::handleCollision(Game *game, Object *foreignObj) {
 }
 
 void Ship::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y);
+  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
 
   if (shieldTicks > 0) {
 
@@ -703,7 +701,7 @@ void ShipLaserShot::handleCollision(Game *game, Object *foreignObj) {
 }
 
 void ShipLaserShot::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y);
+  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
 }
 
 void ShipLaserShot::destroy(Game *game) {
@@ -756,7 +754,7 @@ void EnemyShip::handleCollision(Game *game, Object *foreignObj) {
 }
 
 void EnemyShip::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y);
+  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
 }
 
 void EnemyShip::destroy(Game *game) {
@@ -797,7 +795,7 @@ void EnemyShipLaserShot::handleCollision(Game *game, Object *foreignObj) {
 }
 
 void EnemyShipLaserShot::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y);
+  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
 }
 
 void EnemyShipLaserShot::destroy(Game *game) {
@@ -841,7 +839,7 @@ void LaserPowerUp::handleCollision(Game *game, Object *foreignObj) {
 }
 
 void LaserPowerUp::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y);
+  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
 }
 
 void LaserPowerUp::destroy(Game *game) {
@@ -885,7 +883,7 @@ void ShieldPowerUp::handleCollision(Game *game, Object *foreignObj) {
 }
 
 void ShieldPowerUp::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y);
+  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
 }
 
 void ShieldPowerUp::destroy(Game *game) {
@@ -939,7 +937,14 @@ std::vector<Collision> findCollisions(Game *game) {
   return collisions;
 }
 
+#define DEFAULT_WINDOW_WIDTH 640
+#define DEFAULT_WINDOW_HEIGHT 480
+
 void gameInit(Game *game) {
+
+  game->windowWidth = DEFAULT_WINDOW_WIDTH;
+  game->windowHeight = DEFAULT_WINDOW_HEIGHT;
+  game->aspectRatio = (float)game->windowWidth / game->windowHeight;
 
   game->f = new GeneralRectFactory;
   generalRectFactoryInit(game->f);
@@ -1120,6 +1125,13 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
   }
 }
 
+
+void windowSizeChanged(GLFWwindow * window, int width, int height) {
+  gameRef->windowWidth = width;
+  gameRef->windowHeight = height;
+  gameRef->aspectRatio = (float)width / height;
+}
+
 int main() {
 
   if (!glfwInit()) {
@@ -1136,7 +1148,8 @@ int main() {
   // antialiasing
   glfwWindowHint(GLFW_SAMPLES, 4);
 
-  GLFWwindow *window = glfwCreateWindow(640, 480, "Hello Triangle", NULL, NULL);
+  GLFWwindow *window = glfwCreateWindow(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "Game", NULL, NULL);
+  glfwSetWindowSizeCallback(window, windowSizeChanged);
   if (!window) {
     fprintf(stderr, "ERROR: could not open window with GLFW3\n");
     glfwTerminate();
@@ -1159,7 +1172,7 @@ int main() {
   glfwGetWindowSize(window, &width, &height);
 
   GeneralCircle c;
-  generalCircleInit(width, height, &c, 0.5f, COLOR_YELLOW);
+  generalCircleInit(&c, 0.5f, COLOR_YELLOW);
 
   while (!glfwWindowShouldClose(window)) {
 
@@ -1172,7 +1185,7 @@ int main() {
 
     gameRender(&game);
 
-    generalCircleRender(&c, 0.0f, 0.0f);
+    generalCircleRender(&c, 0.0f, 0.0f, game.aspectRatio);
 
     glfwSwapBuffers(window);
   }
