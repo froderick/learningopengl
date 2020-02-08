@@ -389,7 +389,7 @@ struct Ship : Object {
   static constexpr float MIN_Y = -1 + HALF_HEIGHT;
   static constexpr float MAX_Y = 1 - HALF_HEIGHT;
   static constexpr float FIRE_DELAY_TICKS = 8;
-  static constexpr float SHIELD_TICKS = 60 * 10;
+  static constexpr float SHIELD_TICKS = 60 * 5;
 
   Point position{};
   bool moveLeft = false;
@@ -402,10 +402,12 @@ struct Ship : Object {
   uint16_t shieldTicks = 0;
 
   GeneralRect rect{};
+  GeneralCircle shieldCircle{};
 
-  Ship(uint64_t id, Point position, GeneralRect rect): Object(id, O_SHIP) {
+  Ship(uint64_t id, Point position, GeneralRect rect, GeneralCircle shieldCircle): Object(id, O_SHIP) {
     this->position = position;
     this->rect = rect;
+    this->shieldCircle = shieldCircle;
   }
 
   static Ship* get(Object *obj) {
@@ -572,9 +574,10 @@ struct Game {
   uint64_t objectIdCounter = 0;
   std::vector<Object*> objects;
   Ship *ship;
-
-//  GeneralCircle testCircle;
 };
+
+#define SHIELD_RADIUS 0.15f
+#define SHIELD_DIAMETER SHIELD_RADIUS * 2
 
 // ship
 
@@ -583,7 +586,10 @@ void Ship::create(Game *game, Point p) {
   GeneralRect rect;
   generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_LIGHT_GREY);
 
-  Ship *ship = new Ship(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
+  GeneralCircle shieldCircle;
+  generalCircleInit(&shieldCircle, SHIELD_RADIUS, COLOR_PURPLE);
+
+  Ship *ship = new Ship(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect, shieldCircle);
   game->objects.push_back(ship);
   game->ship = ship;
 }
@@ -626,25 +632,97 @@ void Ship::update(Game *game) {
         break;
     }
     ship->fireDelayTicks = FIRE_DELAY_TICKS;
+  }
 
+  if (shieldTicks > 0) {
+    shieldTicks--;
   }
 
   boundingRects.clear();
-  Rect rect = {
-      .x = ship->position.x - HALF_WIDTH,
-      .y = ship->position.y + HALF_HEIGHT,
-      .width = WIDTH,
-      .height = HEIGHT
-  };
-  boundingRects.push_back(rect);
+  boundingRects.push_back({
+    .x = ship->position.x - HALF_WIDTH,
+    .y = ship->position.y + HALF_HEIGHT,
+    .width = WIDTH,
+    .height = HEIGHT
+  });
+
+  if (shieldTicks > 0) {
+    // make a bounding box for the shield, so we can check via circle intersection on collision with it
+    boundingRects.push_back({
+      .x = ship->position.x - SHIELD_RADIUS,
+      .y = ship->position.y + SHIELD_RADIUS,
+      .width = SHIELD_DIAMETER,
+      .height = SHIELD_DIAMETER
+    });
+  }
+}
+
+struct Circle {
+  float x, y;
+  float radius;
+};
+
+bool circleRectCollide(Circle circle, Rect r) {
+
+  float cx = circle.x;
+  float cy = circle.y;
+
+  // temporary variables to set edges for testing
+  float testX = cx;
+  float testY = cy;
+
+  // which edge is closest?
+  if (cx < r.x)        testX = r.x;      // test left edge
+  else if (cx > r.x+ r.width) testX = r.x + r.width;   // right edge
+  if (cy < r.y)         testY = r.y;      // top edge
+  else if (cy > r.y + r.height) testY = r.y + r.height;   // bottom edge
+
+  // get distance from closest edges
+  float distX = cx-testX;
+  float distY = cy-testY;
+  float distance = sqrt( (distX*distX) + (distY*distY) );
+
+  // if the distance is less than the radius, collision!
+  if (distance <= circle.radius) {
+    return true;
+  }
+  return false;
 }
 
 void Ship::handleCollision(Game *game, Object *foreignObj) {
+
+  // TODO: if shield is enabled, check to see if enemy ships and enemy shots intersect with the shield circle
+  // destroy them if they do (http://www.jeffreythompson.org/collision-detection/circle-rect.php)
+
+  // it would be nice if collision rects had indexes, so we knew which rect generated the collision
+  // then we could only consider cases relevant to that particular rect (which part of my object got hit?)
+
   if (foreignObj->isa(O_ENEMY_SHIP_LASER_SHOT)) {
-    this->destroy(game);
+    if (shieldTicks > 0) {
+      EnemyShipLaserShot *f = (EnemyShipLaserShot*)foreignObj;
+
+      Circle c;
+      c.x = this->position.x;
+      c.y = this->position.y;
+      c.radius = SHIELD_RADIUS;
+      bool collides = circleRectCollide(c, f->boundingRects.front());
+
+      if (collides) {
+        f->destroy(game);
+      }
+    }
+    else {
+      this->destroy(game);
+    }
   }
   else if (foreignObj->type == O_ENEMY_SHIP) {
-    this->destroy(game);
+    if (shieldTicks > 0) {
+      EnemyShip *f = (EnemyShip*)foreignObj;
+      f->destroy(game);
+    }
+    else {
+      this->destroy(game);
+    }
   }
   else if (foreignObj->type == O_LASER_POWER_UP) {
     this->numLaserPowerupsCollected++;
@@ -658,7 +736,7 @@ void Ship::render(Game *game) {
   generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
 
   if (shieldTicks > 0) {
-
+    generalCircleRender(&shieldCircle, this->position.x, this->position.y, game->aspectRatio);
   }
 }
 
@@ -1168,11 +1246,13 @@ int main() {
 
   glfwSetKeyCallback(window, keyCallback);
 
-  int width, height;
-  glfwGetWindowSize(window, &width, &height);
+  // antialising stuff
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 
-  GeneralCircle c;
-  generalCircleInit(&c, 0.5f, COLOR_YELLOW);
+//  GeneralCircle c;
+//  generalCircleInit(&c, 0.5f, COLOR_PURPLE);
+
 
   while (!glfwWindowShouldClose(window)) {
 
@@ -1185,7 +1265,7 @@ int main() {
 
     gameRender(&game);
 
-    generalCircleRender(&c, 0.0f, 0.0f, game.aspectRatio);
+//    generalCircleRender(&c, 0.0f, 0.0f, game.aspectRatio);
 
     glfwSwapBuffers(window);
   }
