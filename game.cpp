@@ -345,322 +345,14 @@ typedef struct {
   float width, height;
 } Rect;
 
-struct Game;
-
-typedef enum {
-  O_SHIP,
-  O_SHIP_LASER_SHOT,
-  O_ENEMY_SHIP,
-  O_ENEMY_SHIP_LASER_SHOT,
-  O_LASER_POWER_UP,
-  O_SHIELD_POWER_UP,
-} ObjType;
-
-struct Object {
-  uint64_t id;
-  ObjType type;
-  std::vector<Rect> boundingRects;
-  bool destroyed = false;
-
-  Object(uint64_t id, ObjType type) {
-    this->id = id;
-    this->type = type;
-  }
-  virtual ~Object() = default;
-
-  bool isa(ObjType type) {
-    return this->type == type;
-  }
-
-  virtual void update(Game *game) = 0;
-  virtual void handleCollision(Game *game, Object *foreignObj) = 0;
-  virtual void render(Game *game) = 0;
-};
-
-struct Ship : Object {
-
-  static constexpr float MOVE_SPEED = .009f;
-  static constexpr float HALF_WIDTH = 0.04f;
-  static constexpr float HALF_HEIGHT = 0.08f;
-  static constexpr float WIDTH = HALF_WIDTH * 2;
-  static constexpr float HEIGHT = HALF_HEIGHT * 2;
-  static constexpr float MIN_X = -1 + HALF_WIDTH;
-  static constexpr float MAX_X = 1 - HALF_WIDTH;
-  static constexpr float MIN_Y = -1 + HALF_HEIGHT;
-  static constexpr float MAX_Y = 1 - HALF_HEIGHT;
-  static constexpr float FIRE_DELAY_TICKS = 8;
-  static constexpr float SHIELD_TICKS = 60 * 5;
-
-  Point position{};
-  bool moveLeft = false;
-  bool moveRight = false;
-  bool moveUp = false;
-  bool moveDown = false;
-  bool continueFiring = false;
-  uint16_t fireDelayTicks = 0;
-  uint16_t numLaserPowerupsCollected = 0;
-  uint16_t shieldTicks = 0;
-
-  GeneralRect rect{};
-  GeneralCircle shieldCircle{};
-
-  Ship(uint64_t id, Point position, GeneralRect rect, GeneralCircle shieldCircle): Object(id, O_SHIP) {
-    this->position = position;
-    this->rect = rect;
-    this->shieldCircle = shieldCircle;
-  }
-
-  static Ship* get(Object *obj) {
-    if (!obj->isa(O_SHIP)) {
-      throw std::runtime_error("not a ship");
-    }
-    return (Ship*)obj;
-  }
-
-  static void create(Game *game, Point p);
-  void update(Game *game) override;
-  void handleCollision(Game *game, Object *foreignObj) override;
-  void render(Game *game) override;
-  void destroy(Game *game);
-};
-
-struct ShipLaserShot : Object {
-
-  static constexpr float MOVE_SPEED = .02f;
-  static constexpr float HALF_WIDTH = 0.004f;
-  static constexpr float HALF_HEIGHT = 0.02f;
-  static constexpr float WIDTH = HALF_WIDTH * 2;
-  static constexpr float HEIGHT = HALF_HEIGHT * 2;
-
-  Point position;
-  GeneralRect rect;
-  ShipLaserShot(uint64_t id, Point position, GeneralRect rect): Object(id, O_SHIP_LASER_SHOT) {
-    this->position = position;
-    this->rect = rect;
-  }
-
-  static void create(Game *game, Point p);
-  void update(Game *game) override;
-  void handleCollision(Game *game, Object *foreignObj) override;
-  void render(Game *game) override;
-  void destroy(Game *game);
-};
-
-struct EnemyShip : Object { // just flies straight and shoots periodically
-
-  static constexpr float MOVE_SPEED = .005f;
-  static constexpr float HALF_WIDTH = 0.03f;
-  static constexpr float HALF_HEIGHT = 0.06f;
-  static constexpr float WIDTH = HALF_WIDTH * 2;
-  static constexpr float HEIGHT = HALF_HEIGHT * 2;
-  static constexpr float MIN_X = -1 + HALF_WIDTH;
-  static constexpr float MAX_X = 1 - HALF_WIDTH;
-  static constexpr float MIN_Y = -1 + HALF_HEIGHT;
-  static constexpr float MAX_Y = 1 - HALF_HEIGHT;
-  static constexpr float FIRE_DELAY_TICKS = 300;
-
-  Point position;
-  uint16_t fireDelayTicks = 0;
-  GeneralRect rect;
-  EnemyShip(uint64_t id, Point position, GeneralRect rect): Object(id, O_ENEMY_SHIP) {
-    this->position = position;
-    this->rect = rect;
-  }
-
-  static void create(Game *game, Point p);
-  void update(Game *game) override;
-  void handleCollision(Game *game, Object *foreignObj) override;
-  void render(Game *game) override;
-  void destroy(Game *game);
-};
-
-struct EnemyShipLaserShot : Object {
-
-  static constexpr float MOVE_SPEED = .02f;
-  static constexpr float HALF_WIDTH = 0.003f;
-  static constexpr float HALF_HEIGHT = 0.01f;
-  static constexpr float WIDTH = HALF_WIDTH * 2;
-  static constexpr float HEIGHT = HALF_HEIGHT * 2;
-
-  Point position;
-  GeneralRect rect;
-  EnemyShipLaserShot(uint64_t id, Point position, GeneralRect rect): Object(id, O_ENEMY_SHIP_LASER_SHOT) {
-    this->position = position;
-    this->rect = rect;
-  }
-
-  static void create(Game *game, Point p);
-  void update(Game *game) override;
-  void handleCollision(Game *game, Object *foreignObj) override;
-  void render(Game *game) override;
-  void destroy(Game *game);
-};
-
-struct LaserPowerUp : Object {
-
-  static constexpr float MOVE_SPEED = .009f;
-  static constexpr float HALF_WIDTH = 0.03f;
-  static constexpr float HALF_HEIGHT = 0.03f;
-  static constexpr float WIDTH = HALF_WIDTH * 2;
-  static constexpr float HEIGHT = HALF_HEIGHT * 2;
-  static constexpr float MIN_X = -1 + HALF_WIDTH;
-  static constexpr float MAX_X = 1 - HALF_WIDTH;
-  static constexpr float MIN_Y = -1 + HALF_HEIGHT;
-  static constexpr float MAX_Y = 1 - HALF_HEIGHT;
-
-  Point position{};
-  bool moveLeft = false;
-  bool moveRight = false;
-  bool moveUp = false;
-  bool moveDown = false;
-  bool continueFiring = false;
-  uint16_t fireDelayTicks = 0;
-  GeneralRect rect{};
-
-  LaserPowerUp(uint64_t id, Point position, GeneralRect rect) : Object(id, O_LASER_POWER_UP) {
-    this->position = position;
-    this->rect = rect;
-  }
-
-  static void create(Game *game, Point p);
-  void update(Game *game) override;
-  void handleCollision(Game *game, Object *foreignObj) override;
-  void render(Game *game) override;
-  void destroy(Game *game);
-};
-
-struct ShieldPowerUp : Object {
-
-  static constexpr float MOVE_SPEED = .009f;
-  static constexpr float HALF_WIDTH = 0.03f;
-  static constexpr float HALF_HEIGHT = 0.03f;
-  static constexpr float WIDTH = HALF_WIDTH * 2;
-  static constexpr float HEIGHT = HALF_HEIGHT * 2;
-  static constexpr float MIN_X = -1 + HALF_WIDTH;
-  static constexpr float MAX_X = 1 - HALF_WIDTH;
-  static constexpr float MIN_Y = -1 + HALF_HEIGHT;
-  static constexpr float MAX_Y = 1 - HALF_HEIGHT;
-
-  Point position{};
-  bool moveLeft = false;
-  bool moveRight = false;
-  bool moveUp = false;
-  bool moveDown = false;
-  bool continueFiring = false;
-  uint16_t fireDelayTicks = 0;
-  GeneralRect rect{};
-
-  ShieldPowerUp(uint64_t id, Point position, GeneralRect rect) : Object(id, O_SHIELD_POWER_UP) {
-    this->position = position;
-    this->rect = rect;
-  }
-
-  static void create(Game *game, Point p);
-  void update(Game *game) override;
-  void handleCollision(Game *game, Object *foreignObj) override;
-  void render(Game *game) override;
-  void destroy(Game *game);
-};
-
-struct Game {
-
-  int windowWidth;
-  int windowHeight;
-  float aspectRatio;
-
-  GeneralRectFactory *f;
-  Stars stars;
-  StarsRenderer starsRenderer;
-  uint64_t objectIdCounter = 0;
-  std::vector<Object*> objects;
-  Ship *ship;
-};
-
-#define SHIELD_RADIUS 0.15f
-#define SHIELD_DIAMETER SHIELD_RADIUS * 2
-
-// ship
-
-void Ship::create(Game *game, Point p) {
-
-  GeneralRect rect;
-  generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_LIGHT_GREY);
-
-  GeneralCircle shieldCircle;
-  generalCircleInit(&shieldCircle, SHIELD_RADIUS, COLOR_PURPLE);
-
-  Ship *ship = new Ship(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect, shieldCircle);
-  game->objects.push_back(ship);
-  game->ship = ship;
-}
-
-void Ship::update(Game *game) {
-
-  Ship* ship = this;
-
-  if (ship->moveDown && (ship->position.y - MOVE_SPEED > MIN_Y)) {
-    ship->position.y -= MOVE_SPEED;
-  }
-  if (ship->moveUp && (ship->position.y + MOVE_SPEED < MAX_Y)) {
-    ship->position.y += MOVE_SPEED;
-  }
-  if (ship->moveLeft && (ship->position.x - MOVE_SPEED > MIN_X)) {
-    ship->position.x -= MOVE_SPEED;
-  }
-  if (ship->moveRight && (ship->position.x + MOVE_SPEED < MAX_X)) {
-    ship->position.x += MOVE_SPEED;
-  }
-
-  if (ship->fireDelayTicks > 0) {
-    ship->fireDelayTicks--;
-  }
-  if (ship->continueFiring && ship->fireDelayTicks == 0) {
-
-    // fire
-    switch (numLaserPowerupsCollected) {
-      case 0:
-        ShipLaserShot::create(game, {.x = ship->position.x, .y = ship->position.y + 0.10f});
-        break;
-      case 1:
-        ShipLaserShot::create(game, {.x = ship->position.x - 0.02f, .y = ship->position.y + 0.10f});
-        ShipLaserShot::create(game, {.x = ship->position.x + 0.02f, .y = ship->position.y + 0.10f});
-        break;
-      default:
-        ShipLaserShot::create(game, {.x = ship->position.x - 0.04f, .y = ship->position.y + 0.10f});
-        ShipLaserShot::create(game, {.x = ship->position.x, .y = ship->position.y + 0.10f});
-        ShipLaserShot::create(game, {.x = ship->position.x + 0.04f, .y = ship->position.y + 0.10f});
-        break;
-    }
-    ship->fireDelayTicks = FIRE_DELAY_TICKS;
-  }
-
-  if (shieldTicks > 0) {
-    shieldTicks--;
-  }
-
-  boundingRects.clear();
-  boundingRects.push_back({
-    .x = ship->position.x - HALF_WIDTH,
-    .y = ship->position.y + HALF_HEIGHT,
-    .width = WIDTH,
-    .height = HEIGHT
-  });
-
-  if (shieldTicks > 0) {
-    // make a bounding box for the shield, so we can check via circle intersection on collision with it
-    boundingRects.push_back({
-      .x = ship->position.x - SHIELD_RADIUS,
-      .y = ship->position.y + SHIELD_RADIUS,
-      .width = SHIELD_DIAMETER,
-      .height = SHIELD_DIAMETER
-    });
-  }
-}
-
 struct Circle {
   float x, y;
   float radius;
 };
+
+bool rectsCollide(Rect a, Rect b) {
+  return (a.x + a.width) > b.x && a.x < (b.x + b.width) && (a.y - a.height) < b.y && a.y > (b.y - b.height);
+}
 
 bool circleRectCollide(Circle circle, Rect r) {
 
@@ -689,7 +381,367 @@ bool circleRectCollide(Circle circle, Rect r) {
   return false;
 }
 
-void Ship::handleCollision(Game *game, Object *foreignObj) {
+struct Game;
+struct Component;
+struct System;
+
+struct Entity {
+  uint64_t id;
+  std::vector<Component*> components;
+  bool destroy = false;
+  Entity(uint64_t id) {
+    this->id = id;
+  }
+  virtual ~Entity() = default;
+
+  void add(Component *comp);
+  void remove(Component *comp);
+};
+
+typedef enum {
+  O_SHIP,
+  O_SHIP_LASER_SHOT,
+  O_ENEMY_SHIP,
+  O_ENEMY_SHIP_LASER_SHOT,
+  O_LASER_POWER_UP,
+  O_SHIELD_POWER_UP,
+} CompType;
+
+struct Component {
+  Entity *entity;
+  CompType type;
+  System *system;
+
+  std::vector<Rect> boundingRects;
+  bool destroy = false;
+
+  Component() {}
+  virtual ~Component() = default;
+
+  bool isa(CompType type) {
+    return this->type == type;
+  }
+};
+
+void Entity::add(Component *comp) {
+  comp->entity = this;
+  components.push_back(comp);
+}
+
+void Entity::remove(Component *comp) {
+}
+
+struct System {
+  virtual void update(Game *game, Component *comp) = 0;
+  virtual void handleCollision(Game *game, Component *nativeComp, Component *foreignComp) = 0;
+  virtual void render(Game *game, Component *comp) = 0;
+};
+
+struct Ship : Component {
+  Point position{};
+  bool moveLeft = false;
+  bool moveRight = false;
+  bool moveUp = false;
+  bool moveDown = false;
+  bool continueFiring = false;
+  uint16_t fireDelayTicks = 0;
+  uint16_t numLaserPowerupsCollected = 0;
+  uint16_t shieldTicks = 0;
+};
+
+struct ShipSystem : System {
+
+  const float MOVE_SPEED = .009f;
+  const float HALF_WIDTH = 0.04f;
+  const float HALF_HEIGHT = 0.08f;
+  const float WIDTH = HALF_WIDTH * 2;
+  const float HEIGHT = HALF_HEIGHT * 2;
+  const float MIN_X = -1 + HALF_WIDTH;
+  const float MAX_X = 1 - HALF_WIDTH;
+  const float MIN_Y = -1 + HALF_HEIGHT;
+  const float MAX_Y = 1 - HALF_HEIGHT;
+  const float FIRE_DELAY_TICKS = 8;
+  const float SHIELD_TICKS = 60 * 5;
+
+  GeneralRect rect{};
+  GeneralCircle shieldCircle{};
+
+  ShipSystem(Game *game);
+  void create(Game *game, Point p);
+  void destroy(Game *game, Component *comp);
+  static Ship* get(Component *obj);
+
+  void update(Game *game, Component *comp) override;
+  void handleCollision(Game *game, Component *nativeComp, Component *foreignComp) override;
+  void render(Game *game, Component *comp) override;
+};
+
+Ship* ShipSystem::get(Component *obj) {
+  if (!obj->isa(O_SHIP)) {
+    throw std::runtime_error("not a ship");
+  }
+  return (Ship*)obj;
+}
+
+struct ShipLaserShot : Component {
+  Point position;
+};
+
+struct ShipLaserShotSystem : System {
+
+  const float MOVE_SPEED = .02f;
+  const float HALF_WIDTH = 0.004f;
+  const float HALF_HEIGHT = 0.02f;
+  const float WIDTH = HALF_WIDTH * 2;
+  const float HEIGHT = HALF_HEIGHT * 2;
+
+  GeneralRect rect{};
+
+  ShipLaserShotSystem(Game *game);
+  void create(Game *game, Point p);
+  void destroy(Game *game, Component *comp);
+  static ShipLaserShot* get(Component *obj);
+
+  void update(Game *game, Component *comp) override;
+  void handleCollision(Game *game, Component *nativeComp, Component *foreignComp) override;
+  void render(Game *game, Component *comp) override;
+};
+
+struct EnemyShip : Component { // just flies straight and shoots periodically
+  Point position;
+  uint16_t fireDelayTicks = 0;
+};
+
+struct EnemyShipSystem : System {
+
+  const float MOVE_SPEED = .005f;
+  const float HALF_WIDTH = 0.03f;
+  const float HALF_HEIGHT = 0.06f;
+  const float WIDTH = HALF_WIDTH * 2;
+  const float HEIGHT = HALF_HEIGHT * 2;
+  const float MIN_X = -1 + HALF_WIDTH;
+  const float MAX_X = 1 - HALF_WIDTH;
+  const float MIN_Y = -1 + HALF_HEIGHT;
+  const float MAX_Y = 1 - HALF_HEIGHT;
+  const float FIRE_DELAY_TICKS = 300;
+
+  GeneralRect rect{};
+
+  EnemyShipSystem(Game *game);
+  void create(Game *game, Point p);
+  void destroy(Game *game, Component *comp);
+  static EnemyShip* get(Component *obj);
+  void spawn(Game *game);
+
+  void update(Game *game, Component *comp) override;
+  void handleCollision(Game *game, Component *nativeComp, Component *foreignComp) override;
+  void render(Game *game, Component *comp) override;
+};
+
+struct EnemyShipLaserShot : Component {
+  Point position;
+};
+
+struct EnemyShipLaserShotSystem : System {
+
+  const float MOVE_SPEED = .02f;
+  const float HALF_WIDTH = 0.003f;
+  const float HALF_HEIGHT = 0.01f;
+  const float WIDTH = HALF_WIDTH * 2;
+  const float HEIGHT = HALF_HEIGHT * 2;
+
+  GeneralRect rect{};
+
+  EnemyShipLaserShotSystem(Game *game);
+  void create(Game *game, Point p);
+  void destroy(Game *game, Component *comp);
+  static EnemyShipLaserShot* get(Component *obj);
+
+  void update(Game *game, Component *comp) override;
+  void handleCollision(Game *game, Component *nativeComp, Component *foreignComp) override;
+  void render(Game *game, Component *comp) override;
+};
+
+struct LaserPowerUp : Component {
+  Point position{};
+};
+
+struct LaserPowerUpSystem : System {
+
+  const float MOVE_SPEED = .009f;
+  const float HALF_WIDTH = 0.03f;
+  const float HALF_HEIGHT = 0.03f;
+  const float WIDTH = HALF_WIDTH * 2;
+  const float HEIGHT = HALF_HEIGHT * 2;
+  const float MIN_X = -1 + HALF_WIDTH;
+  const float MAX_X = 1 - HALF_WIDTH;
+  const float MIN_Y = -1 + HALF_HEIGHT;
+  const float MAX_Y = 1 - HALF_HEIGHT;
+
+  GeneralRect rect{};
+
+  LaserPowerUpSystem(Game *game);
+  void create(Game *game, Point p);
+  void destroy(Game *game, Component *comp);
+  static LaserPowerUp* get(Component *obj);
+  void spawn(Game *game);
+
+  void update(Game *game, Component *comp) override;
+  void handleCollision(Game *game, Component *nativeComp, Component *foreignComp) override;
+  void render(Game *game, Component *comp) override;
+};
+
+struct ShieldPowerUp : Component {
+  Point position{};
+};
+
+struct ShieldPowerUpSystem : System {
+
+  static constexpr float MOVE_SPEED = .009f;
+  static constexpr float HALF_WIDTH = 0.03f;
+  static constexpr float HALF_HEIGHT = 0.03f;
+  static constexpr float WIDTH = HALF_WIDTH * 2;
+  static constexpr float HEIGHT = HALF_HEIGHT * 2;
+  static constexpr float MIN_X = -1 + HALF_WIDTH;
+  static constexpr float MAX_X = 1 - HALF_WIDTH;
+  static constexpr float MIN_Y = -1 + HALF_HEIGHT;
+  static constexpr float MAX_Y = 1 - HALF_HEIGHT;
+
+  GeneralRect rect{};
+
+  ShieldPowerUpSystem(Game *game);
+  void create(Game *game, Point p);
+  void destroy(Game *game, Component *comp);
+  static ShieldPowerUp* get(Component *obj);
+  void spawn(Game *game);
+
+  void update(Game *game, Component *comp) override;
+  void handleCollision(Game *game, Component *nativeComp, Component *foreignComp) override;
+  void render(Game *game, Component *comp) override;
+};
+
+struct Game {
+
+  int windowWidth;
+  int windowHeight;
+  float aspectRatio;
+
+  GeneralRectFactory *f;
+  Stars stars;
+  StarsRenderer starsRenderer;
+
+  ShipSystem *shipSys;
+  ShipLaserShotSystem *shipLaserShotSys;
+  EnemyShipSystem *enemyShipsSys;
+  EnemyShipLaserShotSystem *enemyShipLaserShotSys;
+  LaserPowerUpSystem *laserPowerUpSys;
+  ShieldPowerUpSystem *shieldPowerUpSys;
+
+  uint64_t objectIdCounter = 0;
+  std::vector<Entity*> entities;
+  Ship *ship;
+
+  Entity* create() {
+    Entity *e = new Entity(objectIdCounter++);
+    entities.push_back(e);
+    return e;
+  }
+};
+
+#define SHIELD_RADIUS 0.15f
+#define SHIELD_DIAMETER SHIELD_RADIUS * 2
+
+// ship
+
+ShipSystem::ShipSystem(Game *game) {
+  generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_LIGHT_GREY);
+  generalCircleInit(&shieldCircle, SHIELD_RADIUS, COLOR_PURPLE);
+}
+
+void ShipSystem::create(Game *game, Point p) {
+
+  Ship *ship = new Ship();
+  ship->type = O_SHIP;
+  ship->system = this;
+  ship->position = {.x = p.x, .y = p.y};
+
+  Entity *e = game->create();
+  e->add(ship);
+
+  game->ship = ship;
+}
+
+void ShipSystem::destroy(Game *game, Component *comp) {
+  Ship *ship = get(comp);
+  ship->entity->destroy = true;
+}
+
+void ShipSystem::update(Game *game, Component *comp) {
+
+  Ship* ship = get(comp);
+
+  if (ship->moveDown && (ship->position.y - MOVE_SPEED > MIN_Y)) {
+    ship->position.y -= MOVE_SPEED;
+  }
+  if (ship->moveUp && (ship->position.y + MOVE_SPEED < MAX_Y)) {
+    ship->position.y += MOVE_SPEED;
+  }
+  if (ship->moveLeft && (ship->position.x - MOVE_SPEED > MIN_X)) {
+    ship->position.x -= MOVE_SPEED;
+  }
+  if (ship->moveRight && (ship->position.x + MOVE_SPEED < MAX_X)) {
+    ship->position.x += MOVE_SPEED;
+  }
+
+  if (ship->fireDelayTicks > 0) {
+    ship->fireDelayTicks--;
+  }
+  if (ship->continueFiring && ship->fireDelayTicks == 0) {
+
+    // fire
+    switch (ship->numLaserPowerupsCollected) {
+      case 0:
+        game->shipLaserShotSys->create(game, {.x = ship->position.x, .y = ship->position.y + 0.10f});
+        break;
+      case 1:
+        game->shipLaserShotSys->create(game, {.x = ship->position.x - 0.02f, .y = ship->position.y + 0.10f});
+        game->shipLaserShotSys->create(game, {.x = ship->position.x + 0.02f, .y = ship->position.y + 0.10f});
+        break;
+      default:
+        game->shipLaserShotSys->create(game, {.x = ship->position.x - 0.04f, .y = ship->position.y + 0.10f});
+        game->shipLaserShotSys->create(game, {.x = ship->position.x, .y = ship->position.y + 0.10f});
+        game->shipLaserShotSys->create(game, {.x = ship->position.x + 0.04f, .y = ship->position.y + 0.10f});
+        break;
+    }
+    ship->fireDelayTicks = FIRE_DELAY_TICKS;
+  }
+
+  if (ship->shieldTicks > 0) {
+    ship->shieldTicks--;
+  }
+
+  ship->boundingRects.clear();
+  ship->boundingRects.push_back({
+    .x = ship->position.x - HALF_WIDTH,
+    .y = ship->position.y + HALF_HEIGHT,
+    .width = WIDTH,
+    .height = HEIGHT
+  });
+
+  if (ship->shieldTicks > 0) {
+    // make a bounding box for the shield, so we can check via circle intersection on collision with it
+    ship->boundingRects.push_back({
+      .x = ship->position.x - SHIELD_RADIUS,
+      .y = ship->position.y + SHIELD_RADIUS,
+      .width = SHIELD_DIAMETER,
+      .height = SHIELD_DIAMETER
+    });
+  }
+}
+
+void ShipSystem::handleCollision(Game *game, Component *nativeComp, Component *foreignComp) {
+
+  Ship *ship = get(nativeComp);
 
   // TODO: if shield is enabled, check to see if enemy ships and enemy shots intersect with the shield circle
   // destroy them if they do (http://www.jeffreythompson.org/collision-detection/circle-rect.php)
@@ -697,109 +749,156 @@ void Ship::handleCollision(Game *game, Object *foreignObj) {
   // it would be nice if collision rects had indexes, so we knew which rect generated the collision
   // then we could only consider cases relevant to that particular rect (which part of my object got hit?)
 
-  if (foreignObj->isa(O_ENEMY_SHIP_LASER_SHOT)) {
-    if (shieldTicks > 0) {
-      EnemyShipLaserShot *f = (EnemyShipLaserShot*)foreignObj;
-
-      Circle c;
-      c.x = this->position.x;
-      c.y = this->position.y;
-      c.radius = SHIELD_RADIUS;
-      bool collides = circleRectCollide(c, f->boundingRects.front());
-
-      if (collides) {
-        f->destroy(game);
-      }
-    }
-    else {
-      this->destroy(game);
-    }
+  if (foreignComp->isa(O_ENEMY_SHIP_LASER_SHOT)) {
+//    if (ship->shieldTicks > 0) {
+//      EnemyShipLaserShot *f = (EnemyShipLaserShot*)foreignComp;
+//
+//      Circle c;
+//      c.x = ship->position.x;
+//      c.y = ship->position.y;
+//      c.radius = SHIELD_RADIUS;
+//      bool collides = circleRectCollide(c, f->boundingRects.front());
+//
+//      if (collides) {
+//        f->destroy(game);
+//      }
+//    }
+//    else {
+      destroy(game, nativeComp);
+//    }
   }
-  else if (foreignObj->type == O_ENEMY_SHIP) {
-    if (shieldTicks > 0) {
-      EnemyShip *f = (EnemyShip*)foreignObj;
-      f->destroy(game);
-    }
-    else {
-      this->destroy(game);
-    }
+  else if (foreignComp->type == O_ENEMY_SHIP) {
+//    if (ship->shieldTicks > 0) {
+//      EnemyShip *f = (EnemyShip*)foreignComp;
+//      f->destroy(game);
+//    }
+//    else {
+      destroy(game, nativeComp);
+//    }
   }
-  else if (foreignObj->type == O_LASER_POWER_UP) {
-    this->numLaserPowerupsCollected++;
+  else if (foreignComp->type == O_LASER_POWER_UP) {
+    ship->numLaserPowerupsCollected++;
   }
-  else if (foreignObj->type == O_SHIELD_POWER_UP) {
-    this->shieldTicks = SHIELD_TICKS;
-  }
-}
-
-void Ship::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
-
-  if (shieldTicks > 0) {
-    generalCircleRender(&shieldCircle, this->position.x, this->position.y, game->aspectRatio);
+  else if (foreignComp->type == O_SHIELD_POWER_UP) {
+    ship->shieldTicks = SHIELD_TICKS;
   }
 }
 
-void Ship::destroy(Game *game) {
-  this->destroyed = true;
+void ShipSystem::render(Game *game, Component *comp) {
+  Ship *ship = get(comp);
+  generalRectRender(&rect, ship->position.x, ship->position.y, game->aspectRatio);
+  if (ship->shieldTicks > 0) {
+    generalCircleRender(&shieldCircle, ship->position.x, ship->position.y, game->aspectRatio);
+  }
 }
 
 // ship laser shot
 
-void ShipLaserShot::create(Game *game, Point p) {
-  GeneralRect rect;
+ShipLaserShotSystem::ShipLaserShotSystem(Game *game) {
   generalRectInit(&rect, game->f, WIDTH, HEIGHT, COLOR_YELLOW);
-  auto *shot = new ShipLaserShot(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
-  game->objects.push_back(shot);
 }
 
-void ShipLaserShot::update(Game *game) {
+void ShipLaserShotSystem::create(Game *game, Point p) {
 
-  if (pointIsOffScreen(this->position)) {
-    this->destroy(game);
+  ShipLaserShot *shot = new ShipLaserShot();
+  shot->type = O_SHIP_LASER_SHOT;
+  shot->system = this;
+  shot->position = {.x = p.x, .y = p.y};
+
+  Entity *e = game->create();
+  e->add(shot);
+}
+
+void ShipLaserShotSystem::destroy(Game *game, Component *comp) {
+  ShipLaserShot *shot = get(comp);
+  comp->entity->destroy = true;
+}
+
+ShipLaserShot* ShipLaserShotSystem::get(Component *obj) {
+  if (!obj->isa(O_SHIP_LASER_SHOT)) {
+    throw std::runtime_error("not a ship laser shot");
+  }
+  return (ShipLaserShot*)obj;
+}
+
+void ShipLaserShotSystem::update(Game *game, Component *comp) {
+  ShipLaserShot *shot = get(comp);
+
+  if (pointIsOffScreen(shot->position)) {
+    destroy(game, shot);
   }
   else {
-    this->position.y += MOVE_SPEED;
+    shot->position.y += MOVE_SPEED;
   }
 
-  boundingRects.clear();
+  comp->boundingRects.clear();
   Rect rect = {
-      .x = this->position.x - HALF_WIDTH,
-      .y = this->position.y + HALF_HEIGHT,
+      .x = shot->position.x - HALF_WIDTH,
+      .y = shot->position.y + HALF_HEIGHT,
       .width = WIDTH,
       .height = HEIGHT,
   };
-  boundingRects.push_back(rect);
+  shot->boundingRects.push_back(rect);
 }
 
-void ShipLaserShot::handleCollision(Game *game, Object *foreignObj) {
-  if (foreignObj->type == O_ENEMY_SHIP) {
-    destroy(game);
+void ShipLaserShotSystem::handleCollision(Game *game, Component *nativeComp, Component *foreignComp) {
+  if (foreignComp->type == O_ENEMY_SHIP) {
+    destroy(game, nativeComp);
   }
 }
 
-void ShipLaserShot::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
-}
-
-void ShipLaserShot::destroy(Game *game) {
-  this->destroyed = true;
+void ShipLaserShotSystem::render(Game *game, Component *comp) {
+  ShipLaserShot *shot = get(comp);
+  generalRectRender(&rect, shot->position.x, shot->position.y, game->aspectRatio);
 }
 
 // enemy ship
 
-void EnemyShip::create(Game *game, Point p) {
-  GeneralRect rect;
+EnemyShipSystem::EnemyShipSystem(Game *game) {
   generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_GREEN);
-  EnemyShip *ship = new EnemyShip(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
-  game->objects.push_back(ship);
 }
 
-void EnemyShip::update(Game *game) {
-  EnemyShip *ship = this;
+void EnemyShipSystem::create(Game *game, Point p) {
+
+  auto *ship = new EnemyShip();
+  ship->type = O_ENEMY_SHIP;
+  ship->system = this;
+  ship->position = {.x = p.x, .y = p.y};
+
+  Entity *e = game->create();
+  e->add(ship);
+}
+
+void EnemyShipSystem::destroy(Game *game, Component *comp) {
+  EnemyShip *ship = get(comp);
+  ship->entity->destroy = true;
+}
+
+EnemyShip* EnemyShipSystem::get(Component *obj) {
+  if (!obj->isa(O_ENEMY_SHIP)) {
+    throw std::runtime_error("not a enemy ship");
+  }
+  return (EnemyShip*)obj;
+}
+
+void EnemyShipSystem::spawn(Game *game) {
+  Point p = randomPoint();
+  if (p.x < EnemyShipSystem::MIN_X) {
+    p.x = MIN_X;
+  }
+  else if (p.x > MAX_X) {
+    p.x = MAX_X;
+  }
+  p.y = 1 + HALF_HEIGHT;
+  create(game, p);
+}
+
+
+void EnemyShipSystem::update(Game *game, Component *comp) {
+  EnemyShip *ship = get(comp);
 
   if (ship->position.y < (-1 - HEIGHT)) {
-    this->destroy(game);
+    destroy(game, comp);
   }
   else {
     ship->position.y -= MOVE_SPEED;
@@ -809,209 +908,286 @@ void EnemyShip::update(Game *game) {
     ship->fireDelayTicks--;
   }
   if (ship->fireDelayTicks == 0) {
-    EnemyShipLaserShot::create(game, {.x = ship->position.x, .y = ship->position.y - 0.10f});
+    game->enemyShipLaserShotSys->create(game, {.x = ship->position.x, .y = ship->position.y - 0.10f});
     ship->fireDelayTicks = FIRE_DELAY_TICKS;
   }
 
-  boundingRects.clear();
-  boundingRects.push_back({
-    .x = this->position.x - HALF_WIDTH,
-    .y = this->position.y + HALF_HEIGHT,
+  comp->boundingRects.clear();
+  comp->boundingRects.push_back({
+    .x = ship->position.x - HALF_WIDTH,
+    .y = ship->position.y + HALF_HEIGHT,
     .width = WIDTH,
     .height = HEIGHT,
   });
 }
 
-void EnemyShip::handleCollision(Game *game, Object *foreignObj) {
-  if (foreignObj->type == O_SHIP_LASER_SHOT) {
-    this->destroy(game);
+void EnemyShipSystem::handleCollision(Game *game, Component *nativeComp, Component *foreignComp) {
+  if (foreignComp->type == O_SHIP_LASER_SHOT) {
+    destroy(game, nativeComp);
   }
-  else if (foreignObj->type == O_SHIP) {
-    this->destroy(game);
+  else if (foreignComp->type == O_SHIP) {
+    destroy(game, nativeComp);
   }
 }
 
-void EnemyShip::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
-}
-
-void EnemyShip::destroy(Game *game) {
-  this->destroyed = true;
+void EnemyShipSystem::render(Game *game, Component *comp) {
+  EnemyShip *ship = get(comp);
+  generalRectRender(&rect, ship->position.x, ship->position.y, game->aspectRatio);
 }
 
 // enemy ship laser shot
 
-void EnemyShipLaserShot::create(Game *game, Point p) {
-  GeneralRect rect;
+EnemyShipLaserShotSystem::EnemyShipLaserShotSystem(Game *game) {
   generalRectInit(&rect, game->f, WIDTH, HEIGHT, COLOR_RED);
-  auto *shot = new EnemyShipLaserShot(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
-  game->objects.push_back(shot);
 }
 
-void EnemyShipLaserShot::update(Game *game) {
+void EnemyShipLaserShotSystem::create(Game *game, Point p) {
 
-  if (pointIsOffScreen(this->position)) {
-    this->destroy(game);
+  auto *ship = new EnemyShipLaserShot();
+  ship->type = O_ENEMY_SHIP_LASER_SHOT;
+  ship->system = this;
+  ship->position = {.x = p.x, .y = p.y};
+
+  Entity *e = game->create();
+  e->add(ship);
+}
+
+void EnemyShipLaserShotSystem::destroy(Game *game, Component *comp) {
+  EnemyShipLaserShot *shot = get(comp);
+  shot->entity->destroy = true;
+}
+
+EnemyShipLaserShot* EnemyShipLaserShotSystem::get(Component *obj) {
+  if (!obj->isa(O_ENEMY_SHIP_LASER_SHOT)) {
+    throw std::runtime_error("not an enemy ship laser shot");
+  }
+  return (EnemyShipLaserShot*)obj;
+}
+
+void EnemyShipLaserShotSystem::update(Game *game, Component *comp) {
+  EnemyShipLaserShot *shot = get(comp);
+
+  if (pointIsOffScreen(shot->position)) {
+    destroy(game, comp);
   }
   else {
-    this->position.y -= MOVE_SPEED;
+    shot->position.y -= MOVE_SPEED;
   }
 
-  boundingRects.clear();
-  boundingRects.push_back({
-    .x = this->position.x - HALF_WIDTH,
-    .y = this->position.y + HALF_HEIGHT,
+  shot->boundingRects.clear();
+  shot->boundingRects.push_back({
+    .x = shot->position.x - HALF_WIDTH,
+    .y = shot->position.y + HALF_HEIGHT,
     .width = WIDTH,
     .height = HEIGHT,
   });
 }
 
-void EnemyShipLaserShot::handleCollision(Game *game, Object *foreignObj) {
+void EnemyShipLaserShotSystem::handleCollision(Game *game, Component *nativeComp, Component *foreignObj) {
   if (foreignObj->type == O_SHIP) {
-    this->destroy(game);
+    destroy(game, nativeComp);
   }
 }
 
-void EnemyShipLaserShot::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
+void EnemyShipLaserShotSystem::render(Game *game, Component *comp) {
+  EnemyShipLaserShot *shot = get(comp);
+  generalRectRender(&rect, shot->position.x, shot->position.y, game->aspectRatio);
 }
 
-void EnemyShipLaserShot::destroy(Game *game) {
-  this->destroyed = true;
-}
 
 // laser power up
 
-void LaserPowerUp::create(Game *game, Point p) {
-  GeneralRect rect;
+LaserPowerUpSystem::LaserPowerUpSystem(Game *game) {
   generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_BLUE);
-  LaserPowerUp *up=  new LaserPowerUp(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
-  game->objects.push_back(up);
 }
 
-void LaserPowerUp::update(Game *game) {
+void LaserPowerUpSystem::create(Game *game, Point p) {
 
-  LaserPowerUp* up = this;
+  auto *up = new EnemyShipLaserShot();
+  up->type = O_LASER_POWER_UP;
+  up->system = this;
+  up->position = {.x = p.x, .y = p.y};
+
+  Entity *e = game->create();
+  e->add(up);
+}
+
+void LaserPowerUpSystem::destroy(Game *game, Component *comp) {
+  LaserPowerUp* up = get(comp);
+  up->entity->destroy = true;
+}
+
+LaserPowerUp* LaserPowerUpSystem::get(Component *obj) {
+  if (!obj->isa(O_LASER_POWER_UP)) {
+    throw std::runtime_error("not a laser up");
+  }
+  return (LaserPowerUp*)obj;
+}
+
+void LaserPowerUpSystem::spawn(Game *game) {
+  Point p = randomPoint();
+  if (p.x < MIN_X) {
+    p.x = MIN_X;
+  }
+  else if (p.x > MAX_X) {
+    p.x = MAX_X;
+  }
+  p.y = 1 + HALF_HEIGHT;
+  create(game, p);
+}
+
+void LaserPowerUpSystem::update(Game *game, Component *comp) {
+  LaserPowerUp* up = get(comp);
 
   if (up->position.y < (-1 - HEIGHT)) {
-    this->destroy(game);
+    destroy(game, comp);
   }
   else {
     up->position.y -= MOVE_SPEED;
   }
 
-  boundingRects.clear();
+  up->boundingRects.clear();
   Rect rect = {
       .x = up->position.x - HALF_WIDTH,
       .y = up->position.y + HALF_HEIGHT,
       .width = WIDTH,
       .height = HEIGHT
   };
-  boundingRects.push_back(rect);
+  up->boundingRects.push_back(rect);
 }
 
-void LaserPowerUp::handleCollision(Game *game, Object *foreignObj) {
+void LaserPowerUpSystem::handleCollision(Game *game, Component *nativeComp, Component *foreignObj) {
   if (foreignObj->type == O_SHIP) {
-    this->destroy(game);
+    this->destroy(game, nativeComp);
   }
 }
 
-void LaserPowerUp::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
+void LaserPowerUpSystem::render(Game *game, Component *comp) {
+  LaserPowerUp* up = get(comp);
+  generalRectRender(&rect, up->position.x, up->position.y, game->aspectRatio);
 }
 
-void LaserPowerUp::destroy(Game *game) {
-  this->destroyed = true;
-}
+// shield power up
 
-// laser power up
-
-void ShieldPowerUp::create(Game *game, Point p) {
-  GeneralRect rect;
+ShieldPowerUpSystem::ShieldPowerUpSystem(Game *game) {
   generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_PURPLE);
-  ShieldPowerUp *up=  new ShieldPowerUp(game->objectIdCounter++, {.x = p.x, .y = p.y}, rect);
-  game->objects.push_back(up);
 }
 
-void ShieldPowerUp::update(Game *game) {
+void ShieldPowerUpSystem::create(Game *game, Point p) {
 
-  ShieldPowerUp* up = this;
+  auto *up = new ShieldPowerUp();
+  up->type = O_SHIELD_POWER_UP;
+  up->system = this;
+  up->position = {.x = p.x, .y = p.y};
+
+  Entity *e = game->create();
+  e->add(up);
+}
+
+void ShieldPowerUpSystem::destroy(Game *game, Component *comp) {
+  ShieldPowerUp* up = get(comp);
+  up->entity->destroy = true;
+}
+
+ShieldPowerUp* ShieldPowerUpSystem::get(Component *obj) {
+  if (!obj->isa(O_SHIELD_POWER_UP)) {
+    throw std::runtime_error("not a laser up");
+  }
+  return (ShieldPowerUp*)obj;
+}
+
+void ShieldPowerUpSystem::spawn(Game *game) {
+  Point p = randomPoint();
+  if (p.x < MIN_X) {
+    p.x = MIN_X;
+  }
+  else if (p.x > MAX_X) {
+    p.x = MAX_X;
+  }
+  p.y = 1 + HALF_HEIGHT;
+  create(game, p);
+}
+
+void ShieldPowerUpSystem::update(Game *game, Component *comp) {
+  ShieldPowerUp* up = get(comp);
 
   if (up->position.y < (-1 - HEIGHT)) {
-    this->destroy(game);
+    destroy(game, comp);
   }
   else {
     up->position.y -= MOVE_SPEED;
   }
 
-  boundingRects.clear();
+  up->boundingRects.clear();
   Rect rect = {
       .x = up->position.x - HALF_WIDTH,
       .y = up->position.y + HALF_HEIGHT,
       .width = WIDTH,
       .height = HEIGHT
   };
-  boundingRects.push_back(rect);
+  up->boundingRects.push_back(rect);
 }
 
-void ShieldPowerUp::handleCollision(Game *game, Object *foreignObj) {
+void ShieldPowerUpSystem::handleCollision(Game *game, Component *nativeComp, Component *foreignObj) {
   if (foreignObj->type == O_SHIP) {
-    this->destroy(game);
+    destroy(game, nativeComp);
   }
 }
 
-void ShieldPowerUp::render(Game *game) {
-  generalRectRender(&this->rect, this->position.x, this->position.y, game->aspectRatio);
-}
-
-void ShieldPowerUp::destroy(Game *game) {
-  this->destroyed = true;
+void ShieldPowerUpSystem::render(Game *game, Component *comp) {
+  ShieldPowerUp* up = get(comp);
+  generalRectRender(&rect, up->position.x, up->position.y, game->aspectRatio);
 }
 
 // top-level game //////////////////
 
 typedef struct {
-  Object *a, *b;
+  Component *compA, *compB;
 } Collision;
 
-bool collides(Rect a, Rect b) {
-  return (a.x + a.width) > b.x && a.x < (b.x + b.width) && (a.y - a.height) < b.y && a.y > (b.y - b.height);
-}
+void _findCollisions(Component *compA, Component *compB,
+                     std::vector<Collision> *collected) {
 
-std::vector<Collision> findCollisions(Game *game) {
+  for (Rect aRect : compA->boundingRects) {
+    for (Rect bRect : compB->boundingRects) {
 
-  std::vector<Collision> collisions;
+      if (rectsCollide(aRect, bRect)) {
 
-  for (auto a : game->objects) {
-    for (auto b : game->objects) {
-      if (a != b) {
-        for (Rect aRect : a->boundingRects) {
-          for (Rect bRect : b->boundingRects) {
-
-            if (collides(aRect, bRect)) {
-
-              // avoid duplicate collisions
-              bool isDup = false;
-              for (auto dup : collisions) {
-                if ((dup.a == a && dup.b == b) || (dup.a == b && dup.b == a)) {
-                  isDup = true;
-                  break;
-                }
-              }
-
-              if (!isDup) {
-                Collision c;
-                c.a = a;
-                c.b = b;
-                collisions.push_back(c);
-              }
-            }
+        // avoid duplicate collisions
+        bool isDup = false;
+        for (auto dup : *collected) {
+          if ((dup.compA == compA && dup.compB == compB) || (dup.compA == compB && dup.compB == compA)) {
+            isDup = true;
+            break;
           }
+        }
+
+        if (!isDup) {
+          Collision c;
+          c.compA = compA;
+          c.compB = compB;
+          collected->push_back(c);
         }
       }
     }
   }
+}
 
+std::vector<Collision> findCollisions(Game *game) {
+  std::vector<Collision> collisions;
+  for (auto entityA : game->entities) {
+    for (auto entityB : game->entities) {
+
+      if (entityA != entityB) {
+        for (auto compA : entityA->components) {
+          for (auto compB : entityB->components) {
+            _findCollisions(compA, compB, &collisions);
+          }
+        }
+      }
+
+    }
+  }
   return collisions;
 }
 
@@ -1030,10 +1206,14 @@ void gameInit(Game *game) {
   starsInit(&game->stars);
   starsRendererInit(&game->starsRenderer, game->f);
 
-  Ship::create(game, {.x = 0, .y = -0.75});
-  EnemyShip::create(game, {.x = 0, .y = 0.75});
+  game->shipSys = new ShipSystem(game);
+  game->shipLaserShotSys = new ShipLaserShotSystem(game);
+  game->enemyShipsSys = new EnemyShipSystem(game);
+  game->enemyShipLaserShotSys = new EnemyShipLaserShotSystem(game);
+  game->laserPowerUpSys = new LaserPowerUpSystem(game);
+  game->shieldPowerUpSys = new ShieldPowerUpSystem(game);
 
-//  generalCircleInit(&game->testCircle);
+  game->shipSys->create(game, {.x = 0, .y = -0.75});
 }
 
 void gameTick(Game *game) {
@@ -1042,87 +1222,75 @@ void gameTick(Game *game) {
 
   // using an index for iterating here, since objects can create more objects on update(),
   // meaning that the vector could reallocate and invalidate the iterator pointer
-  for (uint64_t i=0; i<game->objects.size(); i++) {
-    Object *obj = game->objects.at(i);
-    obj->update(game);
+  for (uint64_t i=0; i<game->entities.size(); i++) {
+    Entity *e = game->entities.at(i);
+
+    for (uint64_t j=0; j<e->components.size(); j++) {
+      Component *c = e->components.at(j);
+      c->system->update(game, c);
+    }
   }
 
   auto collisions = findCollisions(game);
-
   if (!collisions.empty()) {
     printf("collisions: %lu\n", collisions.size());
   }
-
   for (auto c : collisions) {
-    if (c.a->destroyed || c.b->destroyed) {
+    if (c.compA->entity->destroy || c.compB->entity->destroy || c.compA->destroy || c.compB->destroy) {
       continue; // don't process collisions with destroyed objects
     }
-    c.a->handleCollision(game, c.b);
-    c.b->handleCollision(game, c.a);
+    c.compA->system->handleCollision(game, c.compA, c.compB);
+    c.compB->system->handleCollision(game, c.compB, c.compA);
   }
 
-  for (auto it = game->objects.begin(); it!=game->objects.end(); ) {
-    if ((*it)->destroyed) {
-      Object *obj = *it;
-      it = game->objects.erase(it);
-      delete obj;
+  for (auto it = game->entities.begin(); it!=game->entities.end(); ) {
+    Entity *e = *it;
+    if (e->destroy) {
+      for (auto comp : e->components) {
+        delete comp;
+      }
+      it = game->entities.erase(it);
+      delete e;
     }
     else {
+      for (auto iu = e->components.begin(); iu!=e->components.end(); ) {
+        Component *comp = *iu;
+        if (comp->destroy) {
+          iu = e->components.erase(iu);
+          delete comp;
+        }
+        else {
+          ++iu;
+        }
+      }
       ++it;
     }
   }
 
-  printf("objects: %lu\n", game->objects.size());
+  printf("entities: %lu\n", game->entities.size());
 
   float enemySpawnChance = (((float)rand()) / ((float)RAND_MAX));
   if (enemySpawnChance < 0.018f) {
-    Point p = randomPoint();
-    if (p.x < EnemyShip::MIN_X) {
-      p.x = EnemyShip::MIN_X;
-    }
-    else if (p.x > EnemyShip::MAX_X) {
-      p.x = EnemyShip::MAX_X;
-    }
-
-    p.y = 1 + EnemyShip::HALF_HEIGHT;
-    EnemyShip::create(game, p);
+    game->enemyShipsSys->spawn(game);
   }
 
   float laserUpChance = (((float)rand()) / ((float)RAND_MAX));
   if (laserUpChance < 0.010f) {
-    Point p = randomPoint();
-    if (p.x < LaserPowerUp::MIN_X) {
-      p.x = LaserPowerUp::MIN_X;
-    }
-    else if (p.x > LaserPowerUp::MAX_X) {
-      p.x = LaserPowerUp::MAX_X;
-    }
-
-    p.y = 1 + LaserPowerUp::HALF_HEIGHT;
-    LaserPowerUp::create(game, p);
+    game->laserPowerUpSys->spawn(game);
   }
 
   float shieldUpChance = (((float)rand()) / ((float)RAND_MAX));
   if (shieldUpChance < 0.010f) {
-    Point p = randomPoint();
-    if (p.x < ShieldPowerUp::MIN_X) {
-      p.x = ShieldPowerUp::MIN_X;
-    }
-    else if (p.x > ShieldPowerUp::MAX_X) {
-      p.x = ShieldPowerUp::MAX_X;
-    }
-
-    p.y = 1 + ShieldPowerUp::HALF_HEIGHT;
-    ShieldPowerUp::create(game, p);
+    game->shieldPowerUpSys->spawn(game);
   }
-
-//  generalCircleRender(&game->testCircle, 0.0f, 0.0f);
 }
 
 void gameRender(Game *game) {
   starsRender(&game->stars, &game->starsRenderer);
-  for (auto obj : game->objects) {
-    obj->render(game);
+  for (auto entity: game->entities) {
+    for (auto comp: entity->components) {
+      comp->system->render(game, comp);
+    }
   }
 }
 
@@ -1189,7 +1357,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
     case GLFW_KEY_E:
       if (action == GLFW_PRESS) {
-        Ship::create(gameRef, {.x = 0, .y = -0.75});
+        gameRef->shipSys->create(gameRef, {.x = 0, .y = -0.75});
       }
       else if (action == GLFW_RELEASE) {
         // ignore up
@@ -1202,7 +1370,6 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
       break;
   }
 }
-
 
 void windowSizeChanged(GLFWwindow * window, int width, int height) {
   gameRef->windowWidth = width;
