@@ -366,8 +366,8 @@ bool circleRectCollide(Circle circle, Rect r) {
   // which edge is closest?
   if (cx < r.x)        testX = r.x;      // test left edge
   else if (cx > r.x+ r.width) testX = r.x + r.width;   // right edge
-  if (cy < r.y)         testY = r.y;      // top edge
-  else if (cy > r.y + r.height) testY = r.y + r.height;   // bottom edge
+  if (cy > r.y)         testY = r.y;      // top edge
+  else if (cy < r.y - r.height) testY = r.y - r.height;   // bottom edge
 
   // get distance from closest edges
   float distX = cx-testX;
@@ -397,6 +397,9 @@ struct Entity {
   void add(Component *comp);
   void remove(Component *comp);
 };
+
+// TODO: these components are too concrete, there should be more decomposed things
+//       like Position, Transform, Physical, Velocity, AINav, etc
 
 typedef enum {
   O_SHIP,
@@ -461,10 +464,8 @@ struct ShipSystem : System {
   const float MIN_Y = -1 + HALF_HEIGHT;
   const float MAX_Y = 1 - HALF_HEIGHT;
   const float FIRE_DELAY_TICKS = 8;
-  const float SHIELD_TICKS = 60 * 5;
 
   GeneralRect rect{};
-  GeneralCircle shieldCircle{};
 
   ShipSystem(Game *game);
   void create(Game *game, Point p);
@@ -483,12 +484,11 @@ struct ShipShield : Component {
 
 struct ShipShieldSystem : System {
 
-  const float HALF_WIDTH = 0.04f;
-  const float HALF_HEIGHT = 0.08f;
-  const float WIDTH = HALF_WIDTH * 2;
-  const float HEIGHT = HALF_HEIGHT * 2;
+  const float SHIELD_RADIUS = 0.15f;
+  const float SHIELD_DIAMETER = SHIELD_RADIUS * 2;
   const float SHIELD_TICKS = 60 * 5;
 
+  GeneralRect rect{};
   GeneralCircle shieldCircle{};
 
   ShipShieldSystem(Game *game);
@@ -528,6 +528,7 @@ struct ShipLaserShotSystem : System {
 struct EnemyShip : Component { // just flies straight and shoots periodically
   Point position;
   uint16_t fireDelayTicks = 0;
+  bool stationary = false;
 };
 
 struct EnemyShipSystem : System {
@@ -547,6 +548,7 @@ struct EnemyShipSystem : System {
 
   EnemyShipSystem(Game *game);
   void create(Game *game, Point p);
+  void create(Game *game, Point p, bool stationary);
   void destroy(Game *game, Component *comp);
   static EnemyShip* get(Component *obj);
   void spawn(Game *game);
@@ -667,14 +669,10 @@ struct Game {
   }
 };
 
-#define SHIELD_RADIUS 0.15f
-#define SHIELD_DIAMETER SHIELD_RADIUS * 2
-
 // ship
 
 ShipSystem::ShipSystem(Game *game) {
   generalRectInit(&rect, game->f, WIDTH / 2, HEIGHT / 2, COLOR_LIGHT_GREY);
-  generalCircleInit(&shieldCircle, SHIELD_RADIUS, COLOR_PURPLE);
 }
 
 void ShipSystem::create(Game *game, Point p) {
@@ -776,6 +774,7 @@ void ShipSystem::render(Game *game, Component *comp) {
 // ship shield
 
 ShipShieldSystem::ShipShieldSystem(Game *game) {
+  generalRectInit(&rect, game->f, SHIELD_RADIUS, SHIELD_RADIUS, COLOR_YELLOW);
   generalCircleInit(&shieldCircle, SHIELD_RADIUS, COLOR_PURPLE);
 }
 
@@ -838,14 +837,20 @@ void ShipShieldSystem::update(Game *game, Component *comp) {
 void ShipShieldSystem::handleCollision(Game *game, Component *nativeComp, Component *foreignComp) {
   ShipShield *s = get(nativeComp);
 
-  if (foreignComp->isa(O_ENEMY_SHIP) || foreignComp->isa(O_ENEMY_SHIP_LASER_SHOT)) {
+  Circle c;
+  c.x = s->ship->position.x;
+  c.y = s->ship->position.y;
+  c.radius = SHIELD_RADIUS;
 
-    Circle c;
-    c.x = s->ship->position.x;
-    c.y = s->ship->position.y;
-    c.radius = SHIELD_RADIUS;
+  if (foreignComp->type == O_ENEMY_SHIP_LASER_SHOT) {
     bool collides = circleRectCollide(c, foreignComp->boundingRects.front());
+    if (collides) {
+      foreignComp->entity->destroy = true;
+    }
+  }
 
+  if (foreignComp->type == O_ENEMY_SHIP) {
+    bool collides = circleRectCollide(c, foreignComp->boundingRects.front());
     if (collides) {
       foreignComp->entity->destroy = true;
     }
@@ -934,6 +939,18 @@ void EnemyShipSystem::create(Game *game, Point p) {
   e->add(ship);
 }
 
+void EnemyShipSystem::create(Game *game, Point p, bool stationary) {
+
+  auto *ship = new EnemyShip();
+  ship->type = O_ENEMY_SHIP;
+  ship->system = this;
+  ship->position = {.x = p.x, .y = p.y};
+  ship->stationary = stationary;
+
+  Entity *e = game->create();
+  e->add(ship);
+}
+
 void EnemyShipSystem::destroy(Game *game, Component *comp) {
   EnemyShip *ship = get(comp);
   ship->entity->destroy = true;
@@ -962,19 +979,22 @@ void EnemyShipSystem::spawn(Game *game) {
 void EnemyShipSystem::update(Game *game, Component *comp) {
   EnemyShip *ship = get(comp);
 
-  if (ship->position.y < (-1 - HEIGHT)) {
-    destroy(game, comp);
-  }
-  else {
-    ship->position.y -= MOVE_SPEED;
-  }
+  if (!ship->stationary) {
+    if (!ship->stationary) {
+      if (ship->position.y < (-1 - HEIGHT)) {
+        destroy(game, comp);
+      } else {
+        ship->position.y -= MOVE_SPEED;
+      }
+    }
 
-  if (ship->fireDelayTicks > 0) {
-    ship->fireDelayTicks--;
-  }
-  if (ship->fireDelayTicks == 0) {
-    game->enemyShipLaserShotSys->create(game, {.x = ship->position.x, .y = ship->position.y - 0.10f});
-    ship->fireDelayTicks = FIRE_DELAY_TICKS;
+    if (ship->fireDelayTicks > 0) {
+      ship->fireDelayTicks--;
+    }
+    if (ship->fireDelayTicks == 0) {
+      game->enemyShipLaserShotSys->create(game, {.x = ship->position.x, .y = ship->position.y - 0.10f});
+      ship->fireDelayTicks = FIRE_DELAY_TICKS;
+    }
   }
 
   comp->boundingRects.clear();
@@ -1257,13 +1277,13 @@ std::vector<Collision> findCollisions(Game *game) {
 }
 
 #define DEFAULT_WINDOW_WIDTH 640
-#define DEFAULT_WINDOW_HEIGHT 480
+#define DEFAULT_WINDOW_HEIGHT 640
 
 void gameInit(Game *game) {
 
   game->windowWidth = DEFAULT_WINDOW_WIDTH;
   game->windowHeight = DEFAULT_WINDOW_HEIGHT;
-  game->aspectRatio = (float)game->windowWidth / game->windowHeight;
+  game->aspectRatio = 1; //(float)game->windowWidth / game->windowHeight;
 
   game->f = new GeneralRectFactory;
   generalRectFactoryInit(game->f);
@@ -1280,6 +1300,8 @@ void gameInit(Game *game) {
   game->shieldPowerUpSys = new ShieldPowerUpSystem(game);
 
   game->shipSys->create(game, {.x = 0, .y = -0.75});
+//  game->shipShieldSys->create(game, game->ship);
+//  game->enemyShipsSys->create(game, {.x = 0, .y = 0}, true);
 }
 
 void gameTick(Game *game) {
