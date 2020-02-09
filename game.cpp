@@ -400,6 +400,7 @@ struct Entity {
 
 typedef enum {
   O_SHIP,
+  O_SHIP_SHIELD,
   O_SHIP_LASER_SHOT,
   O_ENEMY_SHIP,
   O_ENEMY_SHIP_LASER_SHOT,
@@ -446,7 +447,6 @@ struct Ship : Component {
   bool continueFiring = false;
   uint16_t fireDelayTicks = 0;
   uint16_t numLaserPowerupsCollected = 0;
-  uint16_t shieldTicks = 0;
 };
 
 struct ShipSystem : System {
@@ -476,12 +476,30 @@ struct ShipSystem : System {
   void render(Game *game, Component *comp) override;
 };
 
-Ship* ShipSystem::get(Component *obj) {
-  if (!obj->isa(O_SHIP)) {
-    throw std::runtime_error("not a ship");
-  }
-  return (Ship*)obj;
-}
+struct ShipShield : Component {
+  Ship *ship;
+  uint16_t shieldTicks = 0;
+};
+
+struct ShipShieldSystem : System {
+
+  const float HALF_WIDTH = 0.04f;
+  const float HALF_HEIGHT = 0.08f;
+  const float WIDTH = HALF_WIDTH * 2;
+  const float HEIGHT = HALF_HEIGHT * 2;
+  const float SHIELD_TICKS = 60 * 5;
+
+  GeneralCircle shieldCircle{};
+
+  ShipShieldSystem(Game *game);
+  void create(Game *game, Ship *ship);
+  void destroy(Game *game, Component *comp);
+  static ShipShield* get(Component *obj);
+
+  void update(Game *game, Component *comp) override;
+  void handleCollision(Game *game, Component *nativeComp, Component *foreignComp) override;
+  void render(Game *game, Component *comp) override;
+};
 
 struct ShipLaserShot : Component {
   Point position;
@@ -631,6 +649,7 @@ struct Game {
   StarsRenderer starsRenderer;
 
   ShipSystem *shipSys;
+  ShipShieldSystem *shipShieldSys;
   ShipLaserShotSystem *shipLaserShotSys;
   EnemyShipSystem *enemyShipsSys;
   EnemyShipLaserShotSystem *enemyShipLaserShotSys;
@@ -676,6 +695,13 @@ void ShipSystem::destroy(Game *game, Component *comp) {
   ship->entity->destroy = true;
 }
 
+Ship* ShipSystem::get(Component *obj) {
+  if (!obj->isa(O_SHIP)) {
+    throw std::runtime_error("not a ship");
+  }
+  return (Ship*)obj;
+}
+
 void ShipSystem::update(Game *game, Component *comp) {
 
   Ship* ship = get(comp);
@@ -716,10 +742,6 @@ void ShipSystem::update(Game *game, Component *comp) {
     ship->fireDelayTicks = FIRE_DELAY_TICKS;
   }
 
-  if (ship->shieldTicks > 0) {
-    ship->shieldTicks--;
-  }
-
   ship->boundingRects.clear();
   ship->boundingRects.push_back({
     .x = ship->position.x - HALF_WIDTH,
@@ -727,69 +749,112 @@ void ShipSystem::update(Game *game, Component *comp) {
     .width = WIDTH,
     .height = HEIGHT
   });
-
-  if (ship->shieldTicks > 0) {
-    // make a bounding box for the shield, so we can check via circle intersection on collision with it
-    ship->boundingRects.push_back({
-      .x = ship->position.x - SHIELD_RADIUS,
-      .y = ship->position.y + SHIELD_RADIUS,
-      .width = SHIELD_DIAMETER,
-      .height = SHIELD_DIAMETER
-    });
-  }
 }
 
 void ShipSystem::handleCollision(Game *game, Component *nativeComp, Component *foreignComp) {
-
   Ship *ship = get(nativeComp);
 
-  // TODO: if shield is enabled, check to see if enemy ships and enemy shots intersect with the shield circle
-  // destroy them if they do (http://www.jeffreythompson.org/collision-detection/circle-rect.php)
-
-  // it would be nice if collision rects had indexes, so we knew which rect generated the collision
-  // then we could only consider cases relevant to that particular rect (which part of my object got hit?)
-
   if (foreignComp->isa(O_ENEMY_SHIP_LASER_SHOT)) {
-//    if (ship->shieldTicks > 0) {
-//      EnemyShipLaserShot *f = (EnemyShipLaserShot*)foreignComp;
-//
-//      Circle c;
-//      c.x = ship->position.x;
-//      c.y = ship->position.y;
-//      c.radius = SHIELD_RADIUS;
-//      bool collides = circleRectCollide(c, f->boundingRects.front());
-//
-//      if (collides) {
-//        f->destroy(game);
-//      }
-//    }
-//    else {
-      destroy(game, nativeComp);
-//    }
+    destroy(game, nativeComp);
   }
   else if (foreignComp->type == O_ENEMY_SHIP) {
-//    if (ship->shieldTicks > 0) {
-//      EnemyShip *f = (EnemyShip*)foreignComp;
-//      f->destroy(game);
-//    }
-//    else {
-      destroy(game, nativeComp);
-//    }
+    destroy(game, nativeComp);
   }
   else if (foreignComp->type == O_LASER_POWER_UP) {
     ship->numLaserPowerupsCollected++;
   }
   else if (foreignComp->type == O_SHIELD_POWER_UP) {
-    ship->shieldTicks = SHIELD_TICKS;
+    game->shipShieldSys->create(game, ship);
   }
 }
 
 void ShipSystem::render(Game *game, Component *comp) {
   Ship *ship = get(comp);
   generalRectRender(&rect, ship->position.x, ship->position.y, game->aspectRatio);
-  if (ship->shieldTicks > 0) {
-    generalCircleRender(&shieldCircle, ship->position.x, ship->position.y, game->aspectRatio);
+}
+
+// ship shield
+
+ShipShieldSystem::ShipShieldSystem(Game *game) {
+  generalCircleInit(&shieldCircle, SHIELD_RADIUS, COLOR_PURPLE);
+}
+
+void ShipShieldSystem::create(Game *game, Ship *ship) {
+
+  ShipShield *s = nullptr;
+  for (auto c : ship->entity->components) {
+    if (c->isa(O_SHIP_SHIELD)) {
+      s = (ShipShield*)c;
+      break;
+    }
   }
+
+  if (s == nullptr) {
+    s = new ShipShield();
+    s->type = O_SHIP_SHIELD;
+    s->system = this;
+    s->ship = game->ship;
+    s->shieldTicks = SHIELD_TICKS;
+    game->ship->entity->add(s);
+  }
+  else {
+    s->shieldTicks = SHIELD_TICKS;
+  }
+}
+
+void ShipShieldSystem::destroy(Game *game, Component *comp) {
+  ShipShield *s = get(comp);
+  s->destroy = true;
+}
+
+ShipShield* ShipShieldSystem::get(Component *obj) {
+  if (!obj->isa(O_SHIP_SHIELD)) {
+    throw std::runtime_error("not a ship");
+  }
+  return (ShipShield*)obj;
+}
+
+void ShipShieldSystem::update(Game *game, Component *comp) {
+  ShipShield *s = get(comp);
+
+  if (s->shieldTicks > 0) {
+    s->shieldTicks--;
+  }
+
+  if (s->shieldTicks == 0) {
+    destroy(game, s);
+  }
+
+  // make a bounding box for the shield, so we can check via circle intersection on collision with it
+  s->boundingRects.clear();
+  s->boundingRects.push_back({
+    .x = s->ship->position.x - SHIELD_RADIUS,
+    .y = s->ship->position.y + SHIELD_RADIUS,
+    .width = SHIELD_DIAMETER,
+    .height = SHIELD_DIAMETER
+  });
+}
+
+void ShipShieldSystem::handleCollision(Game *game, Component *nativeComp, Component *foreignComp) {
+  ShipShield *s = get(nativeComp);
+
+  if (foreignComp->isa(O_ENEMY_SHIP) || foreignComp->isa(O_ENEMY_SHIP_LASER_SHOT)) {
+
+    Circle c;
+    c.x = s->ship->position.x;
+    c.y = s->ship->position.y;
+    c.radius = SHIELD_RADIUS;
+    bool collides = circleRectCollide(c, foreignComp->boundingRects.front());
+
+    if (collides) {
+      foreignComp->entity->destroy = true;
+    }
+  }
+}
+
+void ShipShieldSystem::render(Game *game, Component *comp) {
+  ShipShield *s = get(comp);
+  generalCircleRender(&shieldCircle, s->ship->position.x, s->ship->position.y, game->aspectRatio);
 }
 
 // ship laser shot
@@ -1207,6 +1272,7 @@ void gameInit(Game *game) {
   starsRendererInit(&game->starsRenderer, game->f);
 
   game->shipSys = new ShipSystem(game);
+  game->shipShieldSys = new ShipShieldSystem(game);
   game->shipLaserShotSys = new ShipLaserShotSystem(game);
   game->enemyShipsSys = new EnemyShipSystem(game);
   game->enemyShipLaserShotSys = new EnemyShipLaserShotSystem(game);
