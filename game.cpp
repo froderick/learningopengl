@@ -398,10 +398,19 @@ struct Entity {
   void remove(Component *comp);
 };
 
-// TODO: these components are too concrete, there should be more decomposed things
-//       like Position, Transform, Physical, Velocity, AINav, etc
+// TODO: these components are too concrete, there should be more decomposed things like
+//  - Transform - x/y coordinates + rotation + optionally relative to another entity
+//  - Collidable - local x/y/width/height coordinates, subject to transformation before eval
+//  - Velocity - x/y movement vectors
+//  - ZigZagMovement
+//  - SpiralMovement
+//  - RelativeMovement
+// Velocity, AINav, etc
 
 typedef enum {
+
+  O_TRANSFORM,
+
   O_SHIP,
   O_SHIP_SHIELD,
   O_SHIP_LASER_SHOT,
@@ -409,6 +418,7 @@ typedef enum {
   O_ENEMY_SHIP_LASER_SHOT,
   O_LASER_POWER_UP,
   O_SHIELD_POWER_UP,
+
 } CompType;
 
 struct Component {
@@ -441,8 +451,12 @@ struct System {
   virtual void render(Game *game, Component *comp) = 0;
 };
 
+struct Transform : Component {
+  Point position;
+  Entity *relativeTo;
+};
+
 struct Ship : Component {
-  Point position{};
   bool moveLeft = false;
   bool moveRight = false;
   bool moveUp = false;
@@ -478,7 +492,6 @@ struct ShipSystem : System {
 };
 
 struct ShipShield : Component {
-  Ship *ship;
   uint16_t shieldTicks = 0;
 };
 
@@ -501,9 +514,7 @@ struct ShipShieldSystem : System {
   void render(Game *game, Component *comp) override;
 };
 
-struct ShipLaserShot : Component {
-  Point position;
-};
+struct ShipLaserShot : Component {};
 
 struct ShipLaserShotSystem : System {
 
@@ -526,7 +537,6 @@ struct ShipLaserShotSystem : System {
 };
 
 struct EnemyShip : Component { // just flies straight and shoots periodically
-  Point position;
   uint16_t fireDelayTicks = 0;
   bool stationary = false;
 };
@@ -558,9 +568,7 @@ struct EnemyShipSystem : System {
   void render(Game *game, Component *comp) override;
 };
 
-struct EnemyShipLaserShot : Component {
-  Point position;
-};
+struct EnemyShipLaserShot : Component {};
 
 struct EnemyShipLaserShotSystem : System {
 
@@ -582,9 +590,7 @@ struct EnemyShipLaserShotSystem : System {
   void render(Game *game, Component *comp) override;
 };
 
-struct LaserPowerUp : Component {
-  Point position{};
-};
+struct LaserPowerUp : Component {};
 
 struct LaserPowerUpSystem : System {
 
@@ -611,9 +617,7 @@ struct LaserPowerUpSystem : System {
   void render(Game *game, Component *comp) override;
 };
 
-struct ShieldPowerUp : Component {
-  Point position{};
-};
+struct ShieldPowerUp : Component {};
 
 struct ShieldPowerUpSystem : System {
 
@@ -640,6 +644,18 @@ struct ShieldPowerUpSystem : System {
   void render(Game *game, Component *comp) override;
 };
 
+struct DummySystem : System {
+  void update(Game *game, Component *comp) override {
+
+  }
+  void handleCollision(Game *game, Component *nativeComp, Component *foreignComp) override {
+
+  }
+  void render(Game *game, Component *comp) override {
+
+  }
+};
+
 struct Game {
 
   int windowWidth;
@@ -657,6 +673,7 @@ struct Game {
   EnemyShipLaserShotSystem *enemyShipLaserShotSys;
   LaserPowerUpSystem *laserPowerUpSys;
   ShieldPowerUpSystem *shieldPowerUpSys;
+  DummySystem *dummySystem;
 
   uint64_t objectIdCounter = 0;
   std::vector<Entity*> entities;
@@ -677,15 +694,37 @@ ShipSystem::ShipSystem(Game *game) {
 
 void ShipSystem::create(Game *game, Point p) {
 
+  Transform *t = new Transform();
+  t->type = O_TRANSFORM;
+  t->system = game->dummySystem;
+  t->position = {.x = p.x, .y = p.y};
+
   Ship *ship = new Ship();
   ship->type = O_SHIP;
   ship->system = this;
-  ship->position = {.x = p.x, .y = p.y};
 
   Entity *e = game->create();
+  e->add(t);
   e->add(ship);
 
   game->ship = ship;
+}
+
+Transform* getTransform(Entity *e) {
+  for (auto c : e->components) {
+    if (c->isa(O_TRANSFORM)) {
+      return (Transform*)c;
+    }
+  }
+  return nullptr;
+}
+
+Transform* requireTransform(Entity *e) {
+  Transform *t = getTransform(e);
+  if (t == nullptr) {
+    throw std::runtime_error("not a ship");
+  }
+  return t;
 }
 
 void ShipSystem::destroy(Game *game, Component *comp) {
@@ -703,18 +742,19 @@ Ship* ShipSystem::get(Component *obj) {
 void ShipSystem::update(Game *game, Component *comp) {
 
   Ship* ship = get(comp);
+  Transform *t = requireTransform(comp->entity);
 
-  if (ship->moveDown && (ship->position.y - MOVE_SPEED > MIN_Y)) {
-    ship->position.y -= MOVE_SPEED;
+  if (ship->moveDown && (t->position.y - MOVE_SPEED > MIN_Y)) {
+    t->position.y -= MOVE_SPEED;
   }
-  if (ship->moveUp && (ship->position.y + MOVE_SPEED < MAX_Y)) {
-    ship->position.y += MOVE_SPEED;
+  if (ship->moveUp && (t->position.y + MOVE_SPEED < MAX_Y)) {
+    t->position.y += MOVE_SPEED;
   }
-  if (ship->moveLeft && (ship->position.x - MOVE_SPEED > MIN_X)) {
-    ship->position.x -= MOVE_SPEED;
+  if (ship->moveLeft && (t->position.x - MOVE_SPEED > MIN_X)) {
+    t->position.x -= MOVE_SPEED;
   }
-  if (ship->moveRight && (ship->position.x + MOVE_SPEED < MAX_X)) {
-    ship->position.x += MOVE_SPEED;
+  if (ship->moveRight && (t->position.x + MOVE_SPEED < MAX_X)) {
+    t->position.x += MOVE_SPEED;
   }
 
   if (ship->fireDelayTicks > 0) {
@@ -725,16 +765,16 @@ void ShipSystem::update(Game *game, Component *comp) {
     // fire
     switch (ship->numLaserPowerupsCollected) {
       case 0:
-        game->shipLaserShotSys->create(game, {.x = ship->position.x, .y = ship->position.y + 0.10f});
+        game->shipLaserShotSys->create(game, {.x = t->position.x, .y = t->position.y + 0.10f});
         break;
       case 1:
-        game->shipLaserShotSys->create(game, {.x = ship->position.x - 0.02f, .y = ship->position.y + 0.10f});
-        game->shipLaserShotSys->create(game, {.x = ship->position.x + 0.02f, .y = ship->position.y + 0.10f});
+        game->shipLaserShotSys->create(game, {.x = t->position.x - 0.02f, .y = t->position.y + 0.10f});
+        game->shipLaserShotSys->create(game, {.x = t->position.x + 0.02f, .y = t->position.y + 0.10f});
         break;
       default:
-        game->shipLaserShotSys->create(game, {.x = ship->position.x - 0.04f, .y = ship->position.y + 0.10f});
-        game->shipLaserShotSys->create(game, {.x = ship->position.x, .y = ship->position.y + 0.10f});
-        game->shipLaserShotSys->create(game, {.x = ship->position.x + 0.04f, .y = ship->position.y + 0.10f});
+        game->shipLaserShotSys->create(game, {.x = t->position.x - 0.04f, .y = t->position.y + 0.10f});
+        game->shipLaserShotSys->create(game, {.x = t->position.x, .y = t->position.y + 0.10f});
+        game->shipLaserShotSys->create(game, {.x = t->position.x + 0.04f, .y = t->position.y + 0.10f});
         break;
     }
     ship->fireDelayTicks = FIRE_DELAY_TICKS;
@@ -742,8 +782,8 @@ void ShipSystem::update(Game *game, Component *comp) {
 
   ship->boundingRects.clear();
   ship->boundingRects.push_back({
-    .x = ship->position.x - HALF_WIDTH,
-    .y = ship->position.y + HALF_HEIGHT,
+    .x = t->position.x - HALF_WIDTH,
+    .y = t->position.y + HALF_HEIGHT,
     .width = WIDTH,
     .height = HEIGHT
   });
@@ -768,7 +808,8 @@ void ShipSystem::handleCollision(Game *game, Component *nativeComp, Component *f
 
 void ShipSystem::render(Game *game, Component *comp) {
   Ship *ship = get(comp);
-  generalRectRender(&rect, ship->position.x, ship->position.y, game->aspectRatio);
+  Transform *t = requireTransform(comp->entity);
+  generalRectRender(&rect, t->position.x, t->position.y, game->aspectRatio);
 }
 
 // ship shield
@@ -792,7 +833,6 @@ void ShipShieldSystem::create(Game *game, Ship *ship) {
     s = new ShipShield();
     s->type = O_SHIP_SHIELD;
     s->system = this;
-    s->ship = game->ship;
     s->shieldTicks = SHIELD_TICKS;
     game->ship->entity->add(s);
   }
@@ -815,6 +855,7 @@ ShipShield* ShipShieldSystem::get(Component *obj) {
 
 void ShipShieldSystem::update(Game *game, Component *comp) {
   ShipShield *s = get(comp);
+  Transform *t = requireTransform(comp->entity);
 
   if (s->shieldTicks > 0) {
     s->shieldTicks--;
@@ -827,8 +868,8 @@ void ShipShieldSystem::update(Game *game, Component *comp) {
   // make a bounding box for the shield, so we can check via circle intersection on collision with it
   s->boundingRects.clear();
   s->boundingRects.push_back({
-    .x = s->ship->position.x - SHIELD_RADIUS,
-    .y = s->ship->position.y + SHIELD_RADIUS,
+    .x = t->position.x - SHIELD_RADIUS,
+    .y = t->position.y + SHIELD_RADIUS,
     .width = SHIELD_DIAMETER,
     .height = SHIELD_DIAMETER
   });
@@ -836,10 +877,11 @@ void ShipShieldSystem::update(Game *game, Component *comp) {
 
 void ShipShieldSystem::handleCollision(Game *game, Component *nativeComp, Component *foreignComp) {
   ShipShield *s = get(nativeComp);
+  Transform *t = requireTransform(s->entity);
 
   Circle c;
-  c.x = s->ship->position.x;
-  c.y = s->ship->position.y;
+  c.x = t->position.x;
+  c.y = t->position.y;
   c.radius = SHIELD_RADIUS;
 
   if (foreignComp->type == O_ENEMY_SHIP_LASER_SHOT) {
@@ -859,7 +901,8 @@ void ShipShieldSystem::handleCollision(Game *game, Component *nativeComp, Compon
 
 void ShipShieldSystem::render(Game *game, Component *comp) {
   ShipShield *s = get(comp);
-  generalCircleRender(&shieldCircle, s->ship->position.x, s->ship->position.y, game->aspectRatio);
+  Transform *t = requireTransform(s->entity);
+  generalCircleRender(&shieldCircle, t->position.x, t->position.y, game->aspectRatio);
 }
 
 // ship laser shot
@@ -870,12 +913,17 @@ ShipLaserShotSystem::ShipLaserShotSystem(Game *game) {
 
 void ShipLaserShotSystem::create(Game *game, Point p) {
 
+  Transform *t = new Transform();
+  t->type = O_TRANSFORM;
+  t->system = game->dummySystem;
+  t->position = {.x = p.x, .y = p.y};
+
   ShipLaserShot *shot = new ShipLaserShot();
   shot->type = O_SHIP_LASER_SHOT;
   shot->system = this;
-  shot->position = {.x = p.x, .y = p.y};
 
   Entity *e = game->create();
+  e->add(t);
   e->add(shot);
 }
 
@@ -893,18 +941,19 @@ ShipLaserShot* ShipLaserShotSystem::get(Component *obj) {
 
 void ShipLaserShotSystem::update(Game *game, Component *comp) {
   ShipLaserShot *shot = get(comp);
+  Transform *t = requireTransform(comp->entity);
 
-  if (pointIsOffScreen(shot->position)) {
+  if (pointIsOffScreen(t->position)) {
     destroy(game, shot);
   }
   else {
-    shot->position.y += MOVE_SPEED;
+    t->position.y += MOVE_SPEED;
   }
 
   comp->boundingRects.clear();
   Rect rect = {
-      .x = shot->position.x - HALF_WIDTH,
-      .y = shot->position.y + HALF_HEIGHT,
+      .x = t->position.x - HALF_WIDTH,
+      .y = t->position.y + HALF_HEIGHT,
       .width = WIDTH,
       .height = HEIGHT,
   };
@@ -919,7 +968,8 @@ void ShipLaserShotSystem::handleCollision(Game *game, Component *nativeComp, Com
 
 void ShipLaserShotSystem::render(Game *game, Component *comp) {
   ShipLaserShot *shot = get(comp);
-  generalRectRender(&rect, shot->position.x, shot->position.y, game->aspectRatio);
+  Transform *t = requireTransform(comp->entity);
+  generalRectRender(&rect, t->position.x, t->position.y, game->aspectRatio);
 }
 
 // enemy ship
@@ -930,24 +980,17 @@ EnemyShipSystem::EnemyShipSystem(Game *game) {
 
 void EnemyShipSystem::create(Game *game, Point p) {
 
-  auto *ship = new EnemyShip();
-  ship->type = O_ENEMY_SHIP;
-  ship->system = this;
-  ship->position = {.x = p.x, .y = p.y};
-
-  Entity *e = game->create();
-  e->add(ship);
-}
-
-void EnemyShipSystem::create(Game *game, Point p, bool stationary) {
+  Transform *t = new Transform();
+  t->type = O_TRANSFORM;
+  t->system = game->dummySystem;
+  t->position = {.x = p.x, .y = p.y};
 
   auto *ship = new EnemyShip();
   ship->type = O_ENEMY_SHIP;
   ship->system = this;
-  ship->position = {.x = p.x, .y = p.y};
-  ship->stationary = stationary;
 
   Entity *e = game->create();
+  e->add(t);
   e->add(ship);
 }
 
@@ -978,13 +1021,14 @@ void EnemyShipSystem::spawn(Game *game) {
 
 void EnemyShipSystem::update(Game *game, Component *comp) {
   EnemyShip *ship = get(comp);
+  Transform *t = requireTransform(comp->entity);
 
   if (!ship->stationary) {
     if (!ship->stationary) {
-      if (ship->position.y < (-1 - HEIGHT)) {
+      if (t->position.y < (-1 - HEIGHT)) {
         destroy(game, comp);
       } else {
-        ship->position.y -= MOVE_SPEED;
+        t->position.y -= MOVE_SPEED;
       }
     }
 
@@ -992,15 +1036,15 @@ void EnemyShipSystem::update(Game *game, Component *comp) {
       ship->fireDelayTicks--;
     }
     if (ship->fireDelayTicks == 0) {
-      game->enemyShipLaserShotSys->create(game, {.x = ship->position.x, .y = ship->position.y - 0.10f});
+      game->enemyShipLaserShotSys->create(game, {.x = t->position.x, .y = t->position.y - 0.10f});
       ship->fireDelayTicks = FIRE_DELAY_TICKS;
     }
   }
 
   comp->boundingRects.clear();
   comp->boundingRects.push_back({
-    .x = ship->position.x - HALF_WIDTH,
-    .y = ship->position.y + HALF_HEIGHT,
+    .x = t->position.x - HALF_WIDTH,
+    .y = t->position.y + HALF_HEIGHT,
     .width = WIDTH,
     .height = HEIGHT,
   });
@@ -1016,8 +1060,8 @@ void EnemyShipSystem::handleCollision(Game *game, Component *nativeComp, Compone
 }
 
 void EnemyShipSystem::render(Game *game, Component *comp) {
-  EnemyShip *ship = get(comp);
-  generalRectRender(&rect, ship->position.x, ship->position.y, game->aspectRatio);
+  Transform *t = requireTransform(comp->entity);
+  generalRectRender(&rect, t->position.x, t->position.y, game->aspectRatio);
 }
 
 // enemy ship laser shot
@@ -1028,12 +1072,17 @@ EnemyShipLaserShotSystem::EnemyShipLaserShotSystem(Game *game) {
 
 void EnemyShipLaserShotSystem::create(Game *game, Point p) {
 
+  Transform *t = new Transform();
+  t->type = O_TRANSFORM;
+  t->system = game->dummySystem;
+  t->position = {.x = p.x, .y = p.y};
+
   auto *ship = new EnemyShipLaserShot();
   ship->type = O_ENEMY_SHIP_LASER_SHOT;
   ship->system = this;
-  ship->position = {.x = p.x, .y = p.y};
 
   Entity *e = game->create();
+  e->add(t);
   e->add(ship);
 }
 
@@ -1051,18 +1100,19 @@ EnemyShipLaserShot* EnemyShipLaserShotSystem::get(Component *obj) {
 
 void EnemyShipLaserShotSystem::update(Game *game, Component *comp) {
   EnemyShipLaserShot *shot = get(comp);
+  Transform *t = requireTransform(comp->entity);
 
-  if (pointIsOffScreen(shot->position)) {
+  if (pointIsOffScreen(t->position)) {
     destroy(game, comp);
   }
   else {
-    shot->position.y -= MOVE_SPEED;
+    t->position.y -= MOVE_SPEED;
   }
 
   shot->boundingRects.clear();
   shot->boundingRects.push_back({
-    .x = shot->position.x - HALF_WIDTH,
-    .y = shot->position.y + HALF_HEIGHT,
+    .x = t->position.x - HALF_WIDTH,
+    .y = t->position.y + HALF_HEIGHT,
     .width = WIDTH,
     .height = HEIGHT,
   });
@@ -1075,8 +1125,8 @@ void EnemyShipLaserShotSystem::handleCollision(Game *game, Component *nativeComp
 }
 
 void EnemyShipLaserShotSystem::render(Game *game, Component *comp) {
-  EnemyShipLaserShot *shot = get(comp);
-  generalRectRender(&rect, shot->position.x, shot->position.y, game->aspectRatio);
+  Transform *t = requireTransform(comp->entity);
+  generalRectRender(&rect, t->position.x, t->position.y, game->aspectRatio);
 }
 
 
@@ -1088,12 +1138,17 @@ LaserPowerUpSystem::LaserPowerUpSystem(Game *game) {
 
 void LaserPowerUpSystem::create(Game *game, Point p) {
 
-  auto *up = new EnemyShipLaserShot();
+  Transform *t = new Transform();
+  t->type = O_TRANSFORM;
+  t->system = game->dummySystem;
+  t->position = {.x = p.x, .y = p.y};
+
+  auto *up = new LaserPowerUp();
   up->type = O_LASER_POWER_UP;
   up->system = this;
-  up->position = {.x = p.x, .y = p.y};
 
   Entity *e = game->create();
+  e->add(t);
   e->add(up);
 }
 
@@ -1123,18 +1178,19 @@ void LaserPowerUpSystem::spawn(Game *game) {
 
 void LaserPowerUpSystem::update(Game *game, Component *comp) {
   LaserPowerUp* up = get(comp);
+  Transform *t = requireTransform(comp->entity);
 
-  if (up->position.y < (-1 - HEIGHT)) {
+  if (t->position.y < (-1 - HEIGHT)) {
     destroy(game, comp);
   }
   else {
-    up->position.y -= MOVE_SPEED;
+    t->position.y -= MOVE_SPEED;
   }
 
   up->boundingRects.clear();
   Rect rect = {
-      .x = up->position.x - HALF_WIDTH,
-      .y = up->position.y + HALF_HEIGHT,
+      .x = t->position.x - HALF_WIDTH,
+      .y = t->position.y + HALF_HEIGHT,
       .width = WIDTH,
       .height = HEIGHT
   };
@@ -1148,8 +1204,8 @@ void LaserPowerUpSystem::handleCollision(Game *game, Component *nativeComp, Comp
 }
 
 void LaserPowerUpSystem::render(Game *game, Component *comp) {
-  LaserPowerUp* up = get(comp);
-  generalRectRender(&rect, up->position.x, up->position.y, game->aspectRatio);
+  Transform *t = requireTransform(comp->entity);
+  generalRectRender(&rect, t->position.x, t->position.y, game->aspectRatio);
 }
 
 // shield power up
@@ -1160,12 +1216,17 @@ ShieldPowerUpSystem::ShieldPowerUpSystem(Game *game) {
 
 void ShieldPowerUpSystem::create(Game *game, Point p) {
 
+  Transform *t = new Transform();
+  t->type = O_TRANSFORM;
+  t->system = game->dummySystem;
+  t->position = {.x = p.x, .y = p.y};
+
   auto *up = new ShieldPowerUp();
   up->type = O_SHIELD_POWER_UP;
   up->system = this;
-  up->position = {.x = p.x, .y = p.y};
 
   Entity *e = game->create();
+  e->add(t);
   e->add(up);
 }
 
@@ -1195,18 +1256,19 @@ void ShieldPowerUpSystem::spawn(Game *game) {
 
 void ShieldPowerUpSystem::update(Game *game, Component *comp) {
   ShieldPowerUp* up = get(comp);
+  Transform *t = requireTransform(comp->entity);
 
-  if (up->position.y < (-1 - HEIGHT)) {
+  if (t->position.y < (-1 - HEIGHT)) {
     destroy(game, comp);
   }
   else {
-    up->position.y -= MOVE_SPEED;
+    t->position.y -= MOVE_SPEED;
   }
 
   up->boundingRects.clear();
   Rect rect = {
-      .x = up->position.x - HALF_WIDTH,
-      .y = up->position.y + HALF_HEIGHT,
+      .x = t->position.x - HALF_WIDTH,
+      .y = t->position.y + HALF_HEIGHT,
       .width = WIDTH,
       .height = HEIGHT
   };
@@ -1221,7 +1283,8 @@ void ShieldPowerUpSystem::handleCollision(Game *game, Component *nativeComp, Com
 
 void ShieldPowerUpSystem::render(Game *game, Component *comp) {
   ShieldPowerUp* up = get(comp);
-  generalRectRender(&rect, up->position.x, up->position.y, game->aspectRatio);
+  Transform *t = requireTransform(comp->entity);
+  generalRectRender(&rect, t->position.x, t->position.y, game->aspectRatio);
 }
 
 // top-level game //////////////////
@@ -1298,6 +1361,7 @@ void gameInit(Game *game) {
   game->enemyShipLaserShotSys = new EnemyShipLaserShotSystem(game);
   game->laserPowerUpSys = new LaserPowerUpSystem(game);
   game->shieldPowerUpSys = new ShieldPowerUpSystem(game);
+  game->dummySystem = new DummySystem();
 
   game->shipSys->create(game, {.x = 0, .y = -0.75});
 //  game->shipShieldSys->create(game, game->ship);
