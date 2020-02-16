@@ -382,76 +382,6 @@ bool circleRectCollide(Circle circle, Rect r) {
   return false;
 }
 
-struct Game;
-struct Entity;
-
-/*
-
- transform -> relative position
- children -> holds references to child entities
- collides -> fires collision events
- health -> has hp, can receive damage, loses hp on damage, destroys when hp=0
- applies-collision-damage -> applies damage to things that take collision damage
- takes-collision-damage -> takes damage when colliding with things that apply collision damage
- absorbs-damage
- expires -> self-destructs after time
- power-up -> specifies the type of power up this is
-
- applies-collision-child -> on collision, adds a child entity to the thing it collides with
-
- */
-
-// TODO: these components are too concrete, there should be more decomposed things like
-//  - Transform - x/y coordinates + rotation + optionally relative to another entity
-//  - Collidable - local x/y/width/height coordinates, subject to transformation before eval
-//  - Velocity - x/y movement vectors
-//  - ZigZagMovement
-//  - SpiralMovement
-//  - RelativeMovement
-// Velocity, AINav, etc
-
-struct Transform {
-  Point position{};
-  Entity *relativeTo = nullptr;
-};
-
-struct Collideable {
-  int type;
-  Rect rect;
-};
-
-enum RenderableType {
-  R_RECT,
-  R_CIRCLE,
-};
-
-struct Renderable {
-  RenderableType type = R_RECT;
-  union {
-    GeneralRect rect;
-    GeneralCircle circle;
-  };
-  Renderable() {}
-};
-
-struct Entity {
-  Transform transform{};
-  std::vector<Renderable> renderables;
-};
-
-struct Collision {
-  Entity *a, *b;
-  int aIndex, bIndex;
-};
-
-struct CollisionHandler {
-  virtual void handle(Game *game, Collision collision) = 0;
-};
-
-struct CollisionSystem {
-  void addListener(CollisionHandler *h);
-  void detectCollisions(Game *game);
-};
 
 //struct Ship : Component {
 //  bool moveLeft = false;
@@ -654,52 +584,6 @@ struct CollisionSystem {
 //};
 
 
-struct RenderSystem;
-
-struct Game {
-
-  int windowWidth;
-  int windowHeight;
-  float aspectRatio;
-
-  GeneralRectFactory *f;
-  Stars stars;
-  StarsRenderer starsRenderer;
-
-  RenderSystem *renderSystem;
-
-//  ShipSystem *shipSys;
-//  ShipShieldSystem *shipShieldSys;
-//  ShipLaserShotSystem *shipLaserShotSys;
-//  EnemyShipSystem *enemyShipsSys;
-//  EnemyShipLaserShotSystem *enemyShipLaserShotSys;
-//  LaserPowerUpSystem *laserPowerUpSys;
-//  ShieldPowerUpSystem *shieldPowerUpSys;
-//  DummySystem *dummySystem;
-//  CollisionSystem *collisionSystem;
-
-  uint64_t objectIdCounter = 0;
-  std::vector<Entity*> entities;
-//  Ship *ship;
-
-  Entity *ship;
-};
-
-struct RenderSystem {
-
-  void render(Game *game, Transform *t, Renderable *r) {
-    switch (r->type) {
-      case R_RECT:
-        generalRectRender(&r->rect, t->position.x, t->position.y, game->aspectRatio);
-        break;
-      case R_CIRCLE:
-        generalCircleRender(&r->circle, t->position.x, t->position.y, game->aspectRatio);
-        break;
-      default:
-        throw std::runtime_error("dunno render type");
-    }
-  }
-};
 
 //void _findCollisions(Component *compA, Component *compB,
 //                     std::vector<Collision> *collected) {
@@ -1389,6 +1273,232 @@ const float SHIP_MIN_Y = -1 + SHIP_HALF_HEIGHT;
 const float SHIP_MAX_Y = 1 - SHIP_HALF_HEIGHT;
 const float SHIP_FIRE_DELAY_TICKS = 8;
 
+struct Game;
+struct Entity;
+
+/*
+
+ transform -> relative position
+ children -> holds references to child entities
+ collides -> fires collision events
+ health -> has hp, can receive damage, loses hp on damage, destroys when hp=0
+ applies-collision-damage -> applies damage to things that take collision damage
+ takes-collision-damage -> takes damage when colliding with things that apply collision damage
+ absorbs-damage
+ expires -> self-destructs after time
+ power-up -> specifies the type of power up this is
+
+ applies-collision-child -> on collision, adds a child entity to the thing it collides with
+
+ */
+
+// TODO: these components are too concrete, there should be more decomposed things like
+//  - Transform - x/y coordinates + rotation + optionally relative to another entity
+//  - Collidable - local x/y/width/height coordinates, subject to transformation before eval
+//  - Velocity - x/y movement vectors
+//  - ZigZagMovement
+//  - SpiralMovement
+//  - RelativeMovement
+// Velocity, AINav, etc
+
+struct Transform {
+  Point position{};
+  Entity *relativeTo = nullptr;
+};
+
+struct Velocity {
+  float x= 0, y = 0;
+};
+
+struct PlayerInput {
+  bool moveLeft = false;
+  bool moveRight = false;
+  bool moveUp = false;
+  bool moveDown = false;
+  bool continueFiring = false;
+};
+
+struct Collideable {
+  int type;
+  Rect rect;
+};
+
+enum RenderableType {
+  R_RECT,
+  R_CIRCLE,
+};
+
+struct Renderable {
+  RenderableType type = R_RECT;
+  union {
+    GeneralRect rect;
+    GeneralCircle circle;
+  };
+  Renderable() {}
+};
+
+struct PosConstraints {
+  float minX, maxX, minY, maxY;
+};
+
+struct Entity {
+  Transform transform{};
+
+  bool hasVelocity = false;
+  Velocity velocity{};
+
+  bool hasPlayerInput = false;
+  PlayerInput playerInput{};
+
+  bool hasAbsolutePositionConstraints = false;
+  PosConstraints absolutePositionConstraints;
+
+  std::vector<Renderable> renderables;
+};
+
+struct Collision {
+  Entity *a, *b;
+  int aIndex, bIndex;
+};
+
+struct CollisionHandler {
+  virtual void handle(Game *game, Collision collision) = 0;
+};
+
+struct CollisionSystem {
+  void addListener(CollisionHandler *h);
+  void detectCollisions(Game *game);
+};
+
+struct UserInputSystem;
+struct MovementSystem;
+struct RenderSystem;
+
+struct Game {
+
+  int windowWidth;
+  int windowHeight;
+  float aspectRatio;
+
+  GeneralRectFactory *f;
+  Stars stars;
+  StarsRenderer starsRenderer;
+
+  UserInputSystem *userInputSystem;
+  MovementSystem *movementSystem;
+  RenderSystem *renderSystem;
+
+//  ShipSystem *shipSys;
+//  ShipShieldSystem *shipShieldSys;
+//  ShipLaserShotSystem *shipLaserShotSys;
+//  EnemyShipSystem *enemyShipsSys;
+//  EnemyShipLaserShotSystem *enemyShipLaserShotSys;
+//  LaserPowerUpSystem *laserPowerUpSys;
+//  ShieldPowerUpSystem *shieldPowerUpSys;
+//  DummySystem *dummySystem;
+//  CollisionSystem *collisionSystem;
+
+  uint64_t objectIdCounter = 0;
+  std::vector<Entity*> entities;
+//  Ship *ship;
+
+  Entity *ship;
+};
+
+struct UserInputSystem {
+
+  void handleInput(Game *game) {
+
+    PlayerInput *i = &game->ship->playerInput;
+    Velocity *v = &game->ship->velocity;
+
+    if (i->moveLeft) {
+      v->x = -SHIP_MOVE_SPEED;
+    } else if (i->moveRight) {
+      v->x = SHIP_MOVE_SPEED;
+    } else {
+      v->x = 0;
+    }
+
+    if (i->moveDown) {
+      v->y = -SHIP_MOVE_SPEED;
+    } else if (i->moveUp) {
+      v->y = SHIP_MOVE_SPEED;
+    } else {
+      v->y = 0;
+    }
+  }
+};
+
+struct MovementSystem {
+
+  void move(Game *game) {
+    for (auto *e : game->entities) {
+
+      if (e->hasVelocity) {
+
+        e->transform.position.x += e->velocity.x;
+        e->transform.position.y += e->velocity.y;
+
+        if (e->hasAbsolutePositionConstraints) {
+
+          Point *pos = &e->transform.position;
+          PosConstraints *cons = &e->absolutePositionConstraints;
+
+          if (pos->x < cons->minX) {
+            pos->x = cons->minX;
+          }
+          if (pos->x > cons->maxX) {
+            pos->x = cons->maxX;
+          }
+          if (pos->y < cons->minY) {
+            pos->y = cons->minY;
+          }
+          if (pos->y > cons->maxY) {
+            pos->y = cons->maxY;
+          }
+        }
+      }
+
+    }
+  }
+
+};
+
+struct RenderSystem {
+
+  void render(Game *game, Transform *t, Renderable *r) {
+    switch (r->type) {
+      case R_RECT:
+        generalRectRender(&r->rect, t->position.x, t->position.y, game->aspectRatio);
+        break;
+      case R_CIRCLE:
+        generalCircleRender(&r->circle, t->position.x, t->position.y, game->aspectRatio);
+        break;
+      default:
+        throw std::runtime_error("dunno render type");
+    }
+  }
+};
+
+void createShip(Game *game) {
+
+  Renderable shipRenderable;
+  shipRenderable.type = R_RECT;
+  generalRectInit(&shipRenderable.rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2, COLOR_LIGHT_GREY);
+
+  auto *ship = new Entity();
+  ship->transform.position = {.x = 0, .y = -0.75};
+  ship->hasVelocity = true;
+  ship->hasPlayerInput = true;
+  ship->hasAbsolutePositionConstraints = true;
+  ship->absolutePositionConstraints = {.minX = SHIP_MIN_X, .maxX = SHIP_MAX_X, .minY = SHIP_MIN_Y, .maxY = SHIP_MAX_Y};
+  ship->renderables.push_back(shipRenderable);
+
+  game->entities.push_back(ship);
+  game->ship = ship;
+}
+
 void gameInit(Game *game) {
 
   game->windowWidth = DEFAULT_WINDOW_WIDTH;
@@ -1401,6 +1511,8 @@ void gameInit(Game *game) {
   starsInit(&game->stars);
   starsRendererInit(&game->starsRenderer, game->f);
 
+  game->userInputSystem = new UserInputSystem();
+  game->movementSystem = new MovementSystem();
   game->renderSystem = new RenderSystem();
 
 //  game->shipSys = new ShipSystem(game);
@@ -1414,16 +1526,7 @@ void gameInit(Game *game) {
 
 //  game->shipSys->create(game, );
 
-  Renderable shipRenderable;
-  shipRenderable.type = R_RECT;
-  generalRectInit(&shipRenderable.rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2, COLOR_LIGHT_GREY);
-
-  auto *ship = new Entity();
-  ship->transform.position = {.x = 0, .y = -0.75};
-  ship->renderables.push_back(shipRenderable);
-
-  game->entities.push_back(ship);
-  game->ship = ship;
+  createShip(game);
 
 //  game->shipShieldSys->create(game, game->ship);
 //  game->enemyShipsSys->create(game, {.x = 0, .y = 0}, true);
@@ -1432,6 +1535,9 @@ void gameInit(Game *game) {
 void gameTick(Game *game) {
 
   starsTick(&game->stars);
+
+  game->userInputSystem->handleInput(game);
+  game->movementSystem->move(game);
 
   // using an index for iterating here, since objects can create more objects on update(),
   // meaning that the vector could reallocate and invalidate the iterator pointer
@@ -1512,76 +1618,78 @@ thread_local Game *gameRef;
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
 
-//  switch (key) {
-//    case GLFW_KEY_UP:
-//      if (action == GLFW_PRESS) {
-//        gameRef->ship->moveUp = true;
-//      }
-//      else if (action == GLFW_RELEASE) {
-//        gameRef->ship->moveUp = false;
-//      }
-//      else {
-//        // ignore repeats
-//      }
-//      break;
-//    case GLFW_KEY_DOWN:
-//      if (action == GLFW_PRESS) {
-//        gameRef->ship->moveDown= true;
-//      }
-//      else if (action == GLFW_RELEASE) {
-//        gameRef->ship->moveDown= false;
-//      }
-//      else {
-//        // ignore repeats
-//      }
-//      break;
-//    case GLFW_KEY_LEFT:
-//      if (action == GLFW_PRESS) {
-//        gameRef->ship->moveLeft= true;
-//      }
-//      else if (action == GLFW_RELEASE) {
-//        gameRef->ship->moveLeft= false;
-//      }
-//      else {
-//        // ignore repeats
-//      }
-//      break;
-//    case GLFW_KEY_RIGHT:
-//      if (action == GLFW_PRESS) {
-//        gameRef->ship->moveRight= true;
-//      }
-//      else if (action == GLFW_RELEASE) {
-//        gameRef->ship->moveRight= false;
-//      }
-//      else {
-//        // ignore repeats
-//      }
-//      break;
-//    case GLFW_KEY_SPACE:
-//      if (action == GLFW_PRESS) {
-//        gameRef->ship->continueFiring = true;
-//      }
-//      else if (action == GLFW_RELEASE) {
-//        gameRef->ship->continueFiring = false;
-//      }
-//      else {
-//        // ignore repeats
-//      }
-//      break;
-//    case GLFW_KEY_E:
-//      if (action == GLFW_PRESS) {
-//        gameRef->shipSys->create(gameRef, {.x = 0, .y = -0.75});
-//      }
-//      else if (action == GLFW_RELEASE) {
-//        // ignore up
-//      }
-//      else {
-//        // ignore repeats
-//      }
-//      break;
-//    default:
-//      break;
-//  }
+  PlayerInput *i = &gameRef->ship->playerInput;
+
+  switch (key) {
+    case GLFW_KEY_UP:
+      if (action == GLFW_PRESS) {
+        i->moveUp = true;
+      }
+      else if (action == GLFW_RELEASE) {
+        i->moveUp = false;
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    case GLFW_KEY_DOWN:
+      if (action == GLFW_PRESS) {
+        i->moveDown= true;
+      }
+      else if (action == GLFW_RELEASE) {
+        i->moveDown= false;
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    case GLFW_KEY_LEFT:
+      if (action == GLFW_PRESS) {
+        i->moveLeft= true;
+      }
+      else if (action == GLFW_RELEASE) {
+        i->moveLeft= false;
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    case GLFW_KEY_RIGHT:
+      if (action == GLFW_PRESS) {
+        i->moveRight= true;
+      }
+      else if (action == GLFW_RELEASE) {
+        i->moveRight= false;
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    case GLFW_KEY_SPACE:
+      if (action == GLFW_PRESS) {
+        i->continueFiring = true;
+      }
+      else if (action == GLFW_RELEASE) {
+        i->continueFiring = false;
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    case GLFW_KEY_E:
+      if (action == GLFW_PRESS) {
+        createShip(gameRef);
+      }
+      else if (action == GLFW_RELEASE) {
+        // ignore up
+      }
+      else {
+        // ignore repeats
+      }
+      break;
+    default:
+      break;
+  }
 }
 
 void windowSizeChanged(GLFWwindow * window, int width, int height) {
