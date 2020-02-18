@@ -1271,7 +1271,13 @@ const float SHIP_MIN_X = -1 + SHIP_HALF_WIDTH;
 const float SHIP_MAX_X = 1 - SHIP_HALF_WIDTH;
 const float SHIP_MIN_Y = -1 + SHIP_HALF_HEIGHT;
 const float SHIP_MAX_Y = 1 - SHIP_HALF_HEIGHT;
-const float SHIP_FIRE_DELAY_TICKS = 8;
+const int SHIP_FIRE_DELAY_TICKS = 8;
+
+const float SHIP_LASER_SHOT_MOVE_SPEED = .02f;
+const float SHIP_LASER_SHOT_HALF_WIDTH = 0.004f;
+const float SHIP_LASER_SHOT_HALF_HEIGHT = 0.02f;
+const float SHIP_LASER_SHOT_WIDTH = SHIP_LASER_SHOT_HALF_WIDTH * 2;
+const float SHIP_LASER_SHOT_HEIGHT = SHIP_LASER_SHOT_HALF_HEIGHT * 2;
 
 struct Game;
 struct Entity;
@@ -1316,6 +1322,7 @@ struct PlayerInput {
   bool moveUp = false;
   bool moveDown = false;
   bool continueFiring = false;
+  int fireDelayTicks = 0;
 };
 
 struct Collideable {
@@ -1353,7 +1360,12 @@ struct Entity {
   bool hasAbsolutePositionConstraints = false;
   PosConstraints absolutePositionConstraints;
 
+  bool hasDestroyPositionConstraints = false;
+  PosConstraints destroyPositionConstraints;
+
   std::vector<Renderable> renderables;
+
+  bool destroy = false;
 };
 
 struct Collision {
@@ -1373,6 +1385,7 @@ struct CollisionSystem {
 struct UserInputSystem;
 struct MovementSystem;
 struct RenderSystem;
+struct DestroySystem;
 
 struct Game {
 
@@ -1387,6 +1400,7 @@ struct Game {
   UserInputSystem *userInputSystem;
   MovementSystem *movementSystem;
   RenderSystem *renderSystem;
+  DestroySystem *destroySystem;
 
 //  ShipSystem *shipSys;
 //  ShipShieldSystem *shipShieldSys;
@@ -1404,6 +1418,8 @@ struct Game {
 
   Entity *ship;
 };
+
+void createShipLaser(Game *game);
 
 struct UserInputSystem {
 
@@ -1427,10 +1443,24 @@ struct UserInputSystem {
     } else {
       v->y = 0;
     }
+
+    if (i->fireDelayTicks > 0) {
+      i->fireDelayTicks--;
+    }
+    if (i->continueFiring && i->fireDelayTicks == 0) {
+      createShipLaser(game);
+      i->fireDelayTicks = SHIP_FIRE_DELAY_TICKS;
+    }
   }
 };
 
 struct MovementSystem {
+
+  bool violatesConstraints(Point pos, PosConstraints cons) {
+    return
+      (pos.x < cons.minX) || (pos.x > cons.maxX) ||
+      (pos.y < cons.minY) || (pos.y > cons.maxY);
+  }
 
   void move(Game *game) {
     for (auto *e : game->entities) {
@@ -1460,9 +1490,31 @@ struct MovementSystem {
         }
       }
 
+      if (e->hasDestroyPositionConstraints) {
+        if (violatesConstraints(e->transform.position, e->destroyPositionConstraints)) {
+          e->destroy = true;
+        }
+      }
+
     }
   }
 
+};
+
+struct DestroySystem {
+
+  void destroy(Game *game) {
+    for (auto it = game->entities.begin(); it!=game->entities.end(); ) {
+      Entity *e = *it;
+      if (e->destroy) {
+        it = game->entities.erase(it);
+        delete e;
+      }
+      else {
+        ++it;
+      }
+    }
+  }
 };
 
 struct RenderSystem {
@@ -1499,6 +1551,25 @@ void createShip(Game *game) {
   game->ship = ship;
 }
 
+void createShipLaser(Game *game) {
+
+  Renderable r;
+  r.type = R_RECT;
+  generalRectInit(&r.rect, game->f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT, COLOR_YELLOW);
+
+  Point *shipP = &game->ship->transform.position;
+
+  auto *e = new Entity();
+  e->transform.position = {.x = shipP->x, .y = shipP->y + 0.10f};
+  e->hasVelocity = true;
+  e->velocity.y = SHIP_LASER_SHOT_MOVE_SPEED;
+  e->hasDestroyPositionConstraints = true;
+  e->destroyPositionConstraints = {.minX = -1, .maxX = 1, .minY = -1, .maxY = 1};
+  e->renderables.push_back(r);
+
+  game->entities.push_back(e);
+}
+
 void gameInit(Game *game) {
 
   game->windowWidth = DEFAULT_WINDOW_WIDTH;
@@ -1514,6 +1585,7 @@ void gameInit(Game *game) {
   game->userInputSystem = new UserInputSystem();
   game->movementSystem = new MovementSystem();
   game->renderSystem = new RenderSystem();
+  game->destroySystem = new DestroySystem();
 
 //  game->shipSys = new ShipSystem(game);
 //  game->shipShieldSys = new ShipShieldSystem(game);
@@ -1538,6 +1610,7 @@ void gameTick(Game *game) {
 
   game->userInputSystem->handleInput(game);
   game->movementSystem->move(game);
+  game->destroySystem->destroy(game);
 
   // using an index for iterating here, since objects can create more objects on update(),
   // meaning that the vector could reallocate and invalidate the iterator pointer
