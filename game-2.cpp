@@ -1241,6 +1241,12 @@ const float ENEMY_SHIP_MIN_Y = -(1 + ENEMY_SHIP_HEIGHT);
 const float ENEMY_SHIP_MAX_Y = 1 + ENEMY_SHIP_HEIGHT;
 const float ENEMY_SHIP_FIRE_DELAY_TICKS = 300;
 
+const float ENEMY_SHIP_LASER_SHOT_MOVE_SPEED = .02f;
+const float ENEMY_SHIP_LASER_SHOT_HALF_WIDTH = 0.003f;
+const float ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT = 0.01f;
+const float ENEMY_SHIP_LASER_SHOT_WIDTH = ENEMY_SHIP_LASER_SHOT_HALF_WIDTH * 2;
+const float ENEMY_SHIP_LASER_SHOT_HEIGHT = ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT * 2;
+
 struct Game;
 struct Entity;
 
@@ -1310,6 +1316,10 @@ struct PosConstraints {
   float minX, maxX, minY, maxY;
 };
 
+struct EnemyAttack {
+  int maxTicks, ticksRemaining;
+};
+
 struct Entity {
   Transform transform{};
 
@@ -1338,6 +1348,9 @@ struct Entity {
 
   std::vector<Renderable> renderables;
 
+  bool hasEnemyAttack = false;
+  EnemyAttack enemyAttack;
+
   bool destroy = false;
 };
 
@@ -1346,6 +1359,7 @@ struct MovementSystem;
 struct RenderSystem;
 struct DestroySystem;
 struct CollisionSystem;
+struct EnemyAttackSystem;
 
 struct Game {
 
@@ -1362,25 +1376,16 @@ struct Game {
   RenderSystem *renderSystem;
   DestroySystem *destroySystem;
   CollisionSystem *collisionSystem;
-
-//  ShipSystem *shipSys;
-//  ShipShieldSystem *shipShieldSys;
-//  ShipLaserShotSystem *shipLaserShotSys;
-//  EnemyShipSystem *enemyShipsSys;
-//  EnemyShipLaserShotSystem *enemyShipLaserShotSys;
-//  LaserPowerUpSystem *laserPowerUpSys;
-//  ShieldPowerUpSystem *shieldPowerUpSys;
-//  DummySystem *dummySystem;
-//  CollisionSystem *collisionSystem;
+  EnemyAttackSystem *enemyAttackSystem;
 
   uint64_t objectIdCounter = 0;
   std::vector<Entity*> entities;
-//  Ship *ship;
 
   Entity *ship;
 };
 
 void createShipLaser(Game *game);
+void createEnemyShipLaser(Game *game, Point p);
 
 struct UserInputSystem {
 
@@ -1564,6 +1569,26 @@ struct CollisionSystem {
   }
 };
 
+struct EnemyAttackSystem {
+
+  void attack(Game *game) {
+
+    for (auto *e : game->entities) {
+      if (e->hasEnemyAttack) {
+
+        if (e->enemyAttack.ticksRemaining > 0) {
+          e->enemyAttack.ticksRemaining--;
+        }
+
+        if (e->enemyAttack.ticksRemaining == 0) {
+          createEnemyShipLaser(game, e->transform.position);
+          e->enemyAttack.ticksRemaining = e->enemyAttack.maxTicks;
+        }
+      }
+    }
+  }
+};
+
 struct DestroySystem {
 
   void destroy(Game *game) {
@@ -1697,6 +1722,39 @@ void createEnemyShip(Game *game) {
   e->sendsPlayerDamageOnCollision = true;
   e->selfDestructWhenSendingDamage = true;
 
+  e->hasEnemyAttack = true;
+  e->enemyAttack.maxTicks = ENEMY_SHIP_FIRE_DELAY_TICKS;
+  e->enemyAttack.ticksRemaining = 0;
+
+  game->entities.push_back(e);
+}
+
+void createEnemyShipLaser(Game *game, Point p) {
+
+  Renderable r;
+  r.type = R_RECT;
+  generalRectInit(&r.rect, game->f, ENEMY_SHIP_LASER_SHOT_WIDTH, ENEMY_SHIP_LASER_SHOT_HEIGHT, COLOR_RED);
+
+  auto *e = new Entity();
+  e->transform.position = {.x = p.x, .y = p.y - 0.10f};
+  e->hasVelocity = true;
+  e->velocity.y = -ENEMY_SHIP_LASER_SHOT_MOVE_SPEED;
+  e->hasDestroyPositionConstraints = true;
+  e->destroyPositionConstraints = {.minX = -1, .maxX = 1, .minY = -1, .maxY = 1};
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+      .type = 0,
+      .rect = {
+          .x = -ENEMY_SHIP_LASER_SHOT_HALF_WIDTH,
+          .y = ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT,
+          .width = ENEMY_SHIP_LASER_SHOT_WIDTH,
+          .height = ENEMY_SHIP_LASER_SHOT_HEIGHT,
+      }
+  });
+  e->sendsPlayerDamageOnCollision = true;
+  e->selfDestructWhenSendingDamage = true;
+
   game->entities.push_back(e);
 }
 
@@ -1717,15 +1775,7 @@ void gameInit(Game *game) {
   game->renderSystem = new RenderSystem();
   game->destroySystem = new DestroySystem();
   game->collisionSystem = new CollisionSystem();
-
-//  game->shipSys = new ShipSystem(game);
-//  game->shipShieldSys = new ShipShieldSystem(game);
-//  game->shipLaserShotSys = new ShipLaserShotSystem(game);
-//  game->enemyShipsSys = new EnemyShipSystem(game);
-//  game->enemyShipLaserShotSys = new EnemyShipLaserShotSystem(game);
-//  game->laserPowerUpSys = new LaserPowerUpSystem(game);
-//  game->shieldPowerUpSys = new ShieldPowerUpSystem(game);
-//  game->dummySystem = new DummySystem();
+  game->enemyAttackSystem = new EnemyAttackSystem();
 
 //  game->shipSys->create(game, );
 
@@ -1741,6 +1791,7 @@ void gameTick(Game *game) {
 
   game->userInputSystem->handleInput(game);
   game->movementSystem->move(game);
+  game->enemyAttackSystem->attack(game);
   game->collisionSystem->collide(game);
   game->destroySystem->destroy(game);
 
