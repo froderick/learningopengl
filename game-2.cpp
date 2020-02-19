@@ -585,55 +585,6 @@ bool circleRectCollide(Circle circle, Rect r) {
 
 
 
-//void _findCollisions(Component *compA, Component *compB,
-//                     std::vector<Collision> *collected) {
-//
-//  Collideable *a = (Collideable*)compA;
-//  Collideable *b = (Collideable*)compB;
-//
-//  if (rectsCollide(a->rect, b->rect)) {
-//
-//    // avoid duplicate collisions
-//    bool isDup = false;
-//    for (auto dup : *collected) {
-//      if ((dup.compA == compA && dup.compB == compB) || (dup.compA == compB && dup.compB == compA)) {
-//        isDup = true;
-//        break;
-//      }
-//    }
-//
-//    if (!isDup) {
-//      Collision c;
-//      c.compA = compA;
-//      c.compB = compB;
-//      collected->push_back(c);
-//    }
-//  }
-//}
-//
-//std::vector<Collision> findCollisions(Game *game) {
-//  std::vector<Collision> collisions;
-//
-//  for (auto entityA : game->entities) {
-//    for (auto entityB : game->entities) {
-//      if (entityA != entityB) {
-//
-//        for (auto compA : entityA->components) {
-//          if (compA->type == O_COLLIDEABLE) {
-//
-//            for (auto compB : entityB->components) {
-//              if (compB->type == O_COLLIDEABLE) {
-//
-//                _findCollisions(compA, compB, &collisions);
-//              }
-//            }
-//          }
-//        }
-//      }
-//    }
-//  }
-//  return collisions;
-//}
 
 // ship
 
@@ -1279,6 +1230,17 @@ const float SHIP_LASER_SHOT_HALF_HEIGHT = 0.02f;
 const float SHIP_LASER_SHOT_WIDTH = SHIP_LASER_SHOT_HALF_WIDTH * 2;
 const float SHIP_LASER_SHOT_HEIGHT = SHIP_LASER_SHOT_HALF_HEIGHT * 2;
 
+const float ENEMY_SHIP_MOVE_SPEED = .005f;
+const float ENEMY_SHIP_HALF_WIDTH = 0.03f;
+const float ENEMY_SHIP_HALF_HEIGHT = 0.06f;
+const float ENEMY_SHIP_WIDTH = ENEMY_SHIP_HALF_WIDTH * 2;
+const float ENEMY_SHIP_HEIGHT = ENEMY_SHIP_HALF_HEIGHT * 2;
+const float ENEMY_SHIP_MIN_X = -1 + ENEMY_SHIP_HALF_WIDTH;
+const float ENEMY_SHIP_MAX_X = 1 - ENEMY_SHIP_HALF_WIDTH;
+const float ENEMY_SHIP_MIN_Y = -(1 + ENEMY_SHIP_HEIGHT);
+const float ENEMY_SHIP_MAX_Y = 1 + ENEMY_SHIP_HEIGHT;
+const float ENEMY_SHIP_FIRE_DELAY_TICKS = 300;
+
 struct Game;
 struct Entity;
 
@@ -1363,29 +1325,27 @@ struct Entity {
   bool hasDestroyPositionConstraints = false;
   PosConstraints destroyPositionConstraints;
 
+  std::vector<Collideable> collideables;
+
+  bool sendsEnemyDamageOnCollision = false;
+  bool receivesEnemyDamageOnCollision = false;
+
+  bool sendsPlayerDamageOnCollision = false;
+  bool receivesPlayerDamageOnCollision = false;
+
+  bool selfDestructWhenSendingDamage = false;
+  bool selfDestructWhenReceivingDamage = false;
+
   std::vector<Renderable> renderables;
 
   bool destroy = false;
-};
-
-struct Collision {
-  Entity *a, *b;
-  int aIndex, bIndex;
-};
-
-struct CollisionHandler {
-  virtual void handle(Game *game, Collision collision) = 0;
-};
-
-struct CollisionSystem {
-  void addListener(CollisionHandler *h);
-  void detectCollisions(Game *game);
 };
 
 struct UserInputSystem;
 struct MovementSystem;
 struct RenderSystem;
 struct DestroySystem;
+struct CollisionSystem;
 
 struct Game {
 
@@ -1401,6 +1361,7 @@ struct Game {
   MovementSystem *movementSystem;
   RenderSystem *renderSystem;
   DestroySystem *destroySystem;
+  CollisionSystem *collisionSystem;
 
 //  ShipSystem *shipSys;
 //  ShipShieldSystem *shipShieldSys;
@@ -1501,6 +1462,108 @@ struct MovementSystem {
 
 };
 
+struct Collision {
+  Entity *a, *b;
+  Collideable *collA, *collB;
+};
+
+struct CollisionHandler {
+  virtual void handle(Game *game, Collision collision) = 0;
+};
+
+/*
+ * iterate over all entities, looking for collisions
+ * when a collision is discovered, determine from the entities themselves how to handle it
+ *
+ *
+ health -> has hp, can receive damage, loses hp on damage, destroys when hp=0
+ applies-collision-damage -> applies damage to things that take collision damage
+ takes-collision-damage -> takes damage when colliding with things that apply collision damage
+ absorbs-damage
+
+ perhaps each system is a listener (damage, health, etc)
+ */
+struct CollisionSystem {
+
+  Rect localRect(Entity *e, Collideable *c) {
+    Point aPoint = e->transform.position;
+    return {
+      .x = aPoint.x + c->rect.x,
+      .y = aPoint.y + c->rect.y,
+      .width = c->rect.width,
+      .height = c->rect.height
+    };
+  }
+
+  std::vector<Collision> findCollisions(Game *game) {
+    std::vector<Collision> collisions;
+
+    for (auto entityA : game->entities) {
+      for (auto entityB : game->entities) {
+        if (entityA != entityB) {
+
+          for (int i=0; i<entityA->collideables.size(); i++) {
+            Collideable *compA = &entityA->collideables.at(i);
+
+            for (int j=0; j<entityB->collideables.size(); j++) {
+              Collideable *compB = &entityB->collideables.at(j);
+
+              Rect localA = localRect(entityA, compA);
+              Rect localB = localRect(entityB, compB);
+
+              if (rectsCollide(localA, localB)) {
+                Collision c;
+                c.a = entityA;
+                c.b = entityB;
+                c.collA = compA;
+                c.collB = compB;
+                collisions.push_back(c);
+              }
+            }
+          }
+        }
+      }
+    }
+    return collisions;
+  }
+
+  void applyDamage(Game *game, Entity *a, Entity *b) {
+    if (a->sendsEnemyDamageOnCollision && b->receivesEnemyDamageOnCollision) {
+      if (a->selfDestructWhenSendingDamage) {
+        a->destroy = true;
+      }
+      if (b->selfDestructWhenReceivingDamage) {
+        b->destroy = true;
+      }
+    }
+    if (a->sendsPlayerDamageOnCollision && b->receivesPlayerDamageOnCollision) {
+      if (a->selfDestructWhenSendingDamage) {
+        a->destroy = true;
+      }
+      if (b->selfDestructWhenReceivingDamage) {
+        b->destroy = true;
+      }
+    }
+  }
+
+  void collide(Game *game) {
+
+    auto collisions = findCollisions(game);
+
+    if (!collisions.empty()) {
+      printf("collisions: %lu\n", collisions.size());
+    }
+    for (auto c : collisions) {
+
+      if (c.a->destroy || c.b->destroy) {
+        continue; // don't process collisions with destroyed objects
+      }
+
+      applyDamage(game, c.a, c.b);
+    }
+  }
+};
+
 struct DestroySystem {
 
   void destroy(Game *game) {
@@ -1547,6 +1610,18 @@ void createShip(Game *game) {
   ship->absolutePositionConstraints = {.minX = SHIP_MIN_X, .maxX = SHIP_MAX_X, .minY = SHIP_MIN_Y, .maxY = SHIP_MAX_Y};
   ship->renderables.push_back(shipRenderable);
 
+  ship->collideables.push_back({
+    .type = 0,
+    .rect = {
+      .x = -SHIP_HALF_WIDTH,
+      .y = SHIP_HALF_HEIGHT,
+      .width = SHIP_WIDTH,
+      .height = SHIP_HEIGHT,
+    }
+  });
+  ship->receivesPlayerDamageOnCollision = true;
+  ship->selfDestructWhenReceivingDamage = true;
+
   game->entities.push_back(ship);
   game->ship = ship;
 }
@@ -1567,6 +1642,61 @@ void createShipLaser(Game *game) {
   e->destroyPositionConstraints = {.minX = -1, .maxX = 1, .minY = -1, .maxY = 1};
   e->renderables.push_back(r);
 
+  e->collideables.push_back({
+   .type = 0,
+   .rect = {
+     .x = -SHIP_LASER_SHOT_HALF_WIDTH,
+     .y = SHIP_LASER_SHOT_HALF_HEIGHT,
+     .width = SHIP_LASER_SHOT_WIDTH,
+     .height = SHIP_LASER_SHOT_HEIGHT,
+   }
+  });
+  e->sendsEnemyDamageOnCollision = true;
+  e->selfDestructWhenSendingDamage = true;
+
+  game->entities.push_back(e);
+}
+
+void createEnemyShip(Game *game) {
+
+  Renderable r;
+  r.type = R_RECT;
+  generalRectInit(&r.rect, game->f, ENEMY_SHIP_WIDTH/ 2, ENEMY_SHIP_HEIGHT/ 2, COLOR_GREEN);
+
+  Point p = randomPoint();
+  if (p.x < ENEMY_SHIP_MIN_X) {
+    p.x = ENEMY_SHIP_MIN_X;
+  }
+  else if (p.x > ENEMY_SHIP_MAX_X) {
+    p.x = ENEMY_SHIP_MAX_X;
+  }
+  p.y = 1 + ENEMY_SHIP_HALF_HEIGHT;
+
+  auto *e = new Entity();
+  e->transform.position = p;
+  e->hasVelocity = true;
+  e->velocity.y = -ENEMY_SHIP_MOVE_SPEED;
+  e->hasDestroyPositionConstraints = true;
+  e->destroyPositionConstraints = {
+    .minX = ENEMY_SHIP_MIN_X, .maxX = ENEMY_SHIP_MAX_X,
+    .minY = ENEMY_SHIP_MIN_Y, .maxY = ENEMY_SHIP_MAX_Y * 2
+  };
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+    .type = 0,
+    .rect = {
+      .x = -ENEMY_SHIP_HALF_WIDTH,
+      .y = ENEMY_SHIP_HALF_HEIGHT,
+      .width = ENEMY_SHIP_WIDTH,
+      .height = ENEMY_SHIP_HEIGHT,
+    }
+  });
+  e->receivesEnemyDamageOnCollision = true;
+  e->selfDestructWhenReceivingDamage = true;
+  e->sendsPlayerDamageOnCollision = true;
+  e->selfDestructWhenSendingDamage = true;
+
   game->entities.push_back(e);
 }
 
@@ -1586,6 +1716,7 @@ void gameInit(Game *game) {
   game->movementSystem = new MovementSystem();
   game->renderSystem = new RenderSystem();
   game->destroySystem = new DestroySystem();
+  game->collisionSystem = new CollisionSystem();
 
 //  game->shipSys = new ShipSystem(game);
 //  game->shipShieldSys = new ShipShieldSystem(game);
@@ -1610,6 +1741,7 @@ void gameTick(Game *game) {
 
   game->userInputSystem->handleInput(game);
   game->movementSystem->move(game);
+  game->collisionSystem->collide(game);
   game->destroySystem->destroy(game);
 
   // using an index for iterating here, since objects can create more objects on update(),
@@ -1623,48 +1755,13 @@ void gameTick(Game *game) {
 //    }
 //  }
 //
-//  auto collisions = findCollisions(game);
-//  if (!collisions.empty()) {
-//    printf("collisions: %lu\n", collisions.size());
-//  }
-//  for (auto c : collisions) {
-//    if (c.compA->entity->destroy || c.compB->entity->destroy || c.compA->destroy || c.compB->destroy) {
-//      continue; // don't process collisions with destroyed objects
-//    }
-//    c.compA->system->handleCollision(game, c.compA, c.compB);
-//    c.compB->system->handleCollision(game, c.compB, c.compA);
-//  }
-//
-//  for (auto it = game->entities.begin(); it!=game->entities.end(); ) {
-//    Entity *e = *it;
-//    if (e->destroy) {
-//      for (auto comp : e->components) {
-//        delete comp;
-//      }
-//      it = game->entities.erase(it);
-//      delete e;
-//    }
-//    else {
-//      for (auto iu = e->components.begin(); iu!=e->components.end(); ) {
-//        Component *comp = *iu;
-//        if (comp->destroy) {
-//          iu = e->components.erase(iu);
-//          delete comp;
-//        }
-//        else {
-//          ++iu;
-//        }
-//      }
-//      ++it;
-//    }
-//  }
 
   printf("entities: %lu\n", game->entities.size());
 
-//  float enemySpawnChance = (((float)rand()) / ((float)RAND_MAX));
-//  if (enemySpawnChance < 0.018f) {
-//    game->enemyShipsSys->spawn(game);
-//  }
+  float enemySpawnChance = (((float)rand()) / ((float)RAND_MAX));
+  if (enemySpawnChance < 0.018f) {
+    createEnemyShip(game);
+  }
 //
 //  float laserUpChance = (((float)rand()) / ((float)RAND_MAX));
 //  if (laserUpChance < 0.010f) {
