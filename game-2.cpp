@@ -1268,6 +1268,10 @@ const float SHIELD_POWER_UP_MAX_X = 1 - SHIELD_POWER_UP_HALF_WIDTH;
 const float SHIELD_POWER_UP_MIN_Y = -1 + SHIELD_POWER_UP_HALF_HEIGHT;
 const float SHIELD_POWER_UP_MAX_Y = 1 - SHIELD_POWER_UP_HALF_HEIGHT;
 
+const float SHIELD_RADIUS = 0.15f;
+const float SHIELD_DIAMETER = SHIELD_RADIUS * 2;
+const float SHIELD_TICKS = 60 * 5;
+
 struct Game;
 struct Entity;
 
@@ -1474,7 +1478,9 @@ struct UserInputSystem {
 
       int numLaserPoweUpsCollected = 0;
       for (auto up : game->ship->powerUps) {
-        numLaserPoweUpsCollected++;
+        if (up.type == UP_LASER) {
+          numLaserPoweUpsCollected++;
+        }
       }
 
       switch (numLaserPoweUpsCollected) {
@@ -1660,7 +1666,11 @@ struct EnemyAttackSystem {
 
   void attack(Game *game) {
 
-    for (auto *e : game->entities) {
+    // using an index for iterating here, since objects can create more objects on update(),
+    // meaning that the vector could reallocate and invalidate the iterator pointer
+    for (uint64_t i=0; i<game->entities.size(); i++) {
+      Entity *e = game->entities.at(i);
+
       if (e->hasEnemyAttack) {
 
         if (e->enemyAttack.ticksRemaining > 0) {
@@ -1677,7 +1687,6 @@ struct EnemyAttackSystem {
 };
 
 struct DestroySystem {
-
   void destroy(Game *game) {
     for (auto it = game->entities.begin(); it!=game->entities.end(); ) {
       Entity *e = *it;
@@ -1894,6 +1903,77 @@ void createLaserPowerUp(Game *game) {
   game->entities.push_back(e);
 }
 
+void createShieldPowerUp(Game *game) {
+
+  Renderable r;
+  r.type = R_RECT;
+  generalRectInit(&r.rect, game->f, SHIELD_POWER_UP_WIDTH / 2, SHIELD_POWER_UP_HEIGHT / 2, COLOR_PURPLE);
+
+  Point p = randomPoint();
+  if (p.x < SHIELD_POWER_UP_MIN_X) {
+    p.x = SHIELD_POWER_UP_MIN_X;
+  }
+  else if (p.x > SHIELD_POWER_UP_MAX_X) {
+    p.x = SHIELD_POWER_UP_MAX_X;
+  }
+  p.y = 1 + SHIELD_POWER_UP_HALF_HEIGHT;
+
+  auto *e = new Entity();
+  e->transform.position = p;
+  e->hasVelocity = true;
+  e->velocity.y = -SHIELD_POWER_UP_MOVE_SPEED;
+  e->hasDestroyPositionConstraints = true;
+  e->destroyPositionConstraints = {
+      .minX = SHIELD_POWER_UP_MIN_X, .maxX = SHIELD_POWER_UP_MAX_X,
+      .minY = SHIELD_POWER_UP_MIN_Y, .maxY = SHIELD_POWER_UP_MAX_Y * 2
+  };
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+    .type = 0,
+    .rect = {
+      .x = -SHIELD_POWER_UP_HALF_WIDTH,
+      .y = SHIELD_POWER_UP_HALF_HEIGHT,
+      .width = SHIELD_POWER_UP_WIDTH,
+      .height = SHIELD_POWER_UP_HEIGHT,
+    }
+  });
+
+  e->sendsPowerUps = true;
+  e->sendPowerUp.destroyOnSend = true;
+  e->sendPowerUp.type = UP_SHIELD;
+
+  game->entities.push_back(e);
+}
+
+void createShield(Game *game) {
+
+  Renderable r;
+  r.type = R_CIRCLE;
+  generalCircleInit(&r.circle, SHIELD_RADIUS, COLOR_PURPLE);
+
+  auto *e = new Entity();
+  e->transform.position = {.x = 0, .y = 0};
+  e->transform.relativeTo = game->ship;
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+     .type = 0,
+     .rect = {
+         .x = -SHIELD_RADIUS,
+         .y = SHIELD_RADIUS,
+         .width = SHIELD_DIAMETER,
+         .height = SHIELD_DIAMETER,
+     }
+  });
+
+  e->sendsPowerUps = true;
+  e->sendPowerUp.destroyOnSend = true;
+  e->sendPowerUp.type = UP_SHIELD;
+
+  game->entities.push_back(e);
+}
+
 void gameInit(Game *game) {
 
   game->windowWidth = DEFAULT_WINDOW_WIDTH;
@@ -1931,18 +2011,6 @@ void gameTick(Game *game) {
   game->collisionSystem->collide(game);
   game->destroySystem->destroy(game);
 
-  // using an index for iterating here, since objects can create more objects on update(),
-  // meaning that the vector could reallocate and invalidate the iterator pointer
-//  for (uint64_t i=0; i<game->entities.size(); i++) {
-//    Entity *e = game->entities.at(i);
-//
-//    for (uint64_t j=0; j<e->components.size(); j++) {
-//      Component *c = e->components.at(j);
-//      c->system->update(game, c);
-//    }
-//  }
-//
-
   printf("entities: %lu\n", game->entities.size());
 
   float enemySpawnChance = (((float)rand()) / ((float)RAND_MAX));
@@ -1955,10 +2023,10 @@ void gameTick(Game *game) {
     createLaserPowerUp(game);
   }
 
-//  float shieldUpChance = (((float)rand()) / ((float)RAND_MAX));
-//  if (shieldUpChance < 0.010f) {
-//    game->shieldPowerUpSys->spawn(game);
-//  }
+  float shieldUpChance = (((float)rand()) / ((float)RAND_MAX));
+  if (shieldUpChance < 0.010f) {
+    createShieldPowerUp(game);
+  }
 }
 
 void gameRender(Game *game) {
