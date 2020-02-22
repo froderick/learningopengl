@@ -1247,6 +1247,27 @@ const float ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT = 0.01f;
 const float ENEMY_SHIP_LASER_SHOT_WIDTH = ENEMY_SHIP_LASER_SHOT_HALF_WIDTH * 2;
 const float ENEMY_SHIP_LASER_SHOT_HEIGHT = ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT * 2;
 
+
+const float LASER_POWER_UP_MOVE_SPEED = .009f;
+const float LASER_POWER_UP_HALF_WIDTH = 0.03f;
+const float LASER_POWER_UP_HALF_HEIGHT = 0.03f;
+const float LASER_POWER_UP_WIDTH = LASER_POWER_UP_HALF_WIDTH * 2;
+const float LASER_POWER_UP_HEIGHT = LASER_POWER_UP_HALF_HEIGHT * 2;
+const float LASER_POWER_UP_MIN_X = -1 + LASER_POWER_UP_HALF_WIDTH;
+const float LASER_POWER_UP_MAX_X = 1 - LASER_POWER_UP_HALF_WIDTH;
+const float LASER_POWER_UP_MIN_Y = -1 + LASER_POWER_UP_HALF_HEIGHT;
+const float LASER_POWER_UP_MAX_Y = 1 - LASER_POWER_UP_HALF_HEIGHT;
+
+const float SHIELD_POWER_UP_MOVE_SPEED = .009f;
+const float SHIELD_POWER_UP_HALF_WIDTH = 0.03f;
+const float SHIELD_POWER_UP_HALF_HEIGHT = 0.03f;
+const float SHIELD_POWER_UP_WIDTH = SHIELD_POWER_UP_HALF_WIDTH * 2;
+const float SHIELD_POWER_UP_HEIGHT = SHIELD_POWER_UP_HALF_HEIGHT * 2;
+const float SHIELD_POWER_UP_MIN_X = -1 + SHIELD_POWER_UP_HALF_WIDTH;
+const float SHIELD_POWER_UP_MAX_X = 1 - SHIELD_POWER_UP_HALF_WIDTH;
+const float SHIELD_POWER_UP_MIN_Y = -1 + SHIELD_POWER_UP_HALF_HEIGHT;
+const float SHIELD_POWER_UP_MAX_Y = 1 - SHIELD_POWER_UP_HALF_HEIGHT;
+
 struct Game;
 struct Entity;
 
@@ -1320,6 +1341,36 @@ struct EnemyAttack {
   int maxTicks, ticksRemaining;
 };
 
+/*
+ * Damage is applied on the basis of a SendsDamage entity colliding with a ReceivesDamage entity
+ */
+enum DamageType {
+  DAMAGE_ENEMY,
+  DAMAGE_PLAYER,
+};
+struct SendDamage {
+  DamageType type;
+  bool destroyOnSend;
+};
+struct ReceiveDamage {
+  DamageType type;
+  bool destroyOnReceive;
+};
+
+/*
+ * Power Ups are applied on the basis of a SendPowerUp entity colliding with a ReceivePowerUp entity.
+ */
+enum PowerUpType {
+  UP_LASER, UP_SHIELD,
+};
+struct SendPowerUp {
+  PowerUpType type;
+  bool destroyOnSend;
+};
+struct PowerUp {
+  PowerUpType type;
+};
+
 struct Entity {
   Transform transform{};
 
@@ -1337,19 +1388,25 @@ struct Entity {
 
   std::vector<Collideable> collideables;
 
-  bool sendsEnemyDamageOnCollision = false;
-  bool receivesEnemyDamageOnCollision = false;
+  bool sendsDamage = false;
+  SendDamage sendDamage;
 
-  bool sendsPlayerDamageOnCollision = false;
-  bool receivesPlayerDamageOnCollision = false;
+  bool receivesDamage = false;
+  ReceiveDamage receiveDamage;
 
-  bool selfDestructWhenSendingDamage = false;
-  bool selfDestructWhenReceivingDamage = false;
+//  bool sendsPowerUpOnCollision = false;
+//  bool receivesPowerUpOnCollision = false;
+//  bool selfDestructWhenSendingPowerUp = false;
 
   std::vector<Renderable> renderables;
 
   bool hasEnemyAttack = false;
   EnemyAttack enemyAttack;
+
+  bool sendsPowerUps = false;
+  SendPowerUp sendPowerUp;
+  bool receivesPowerUps = false;
+  std::vector<PowerUp> powerUps;
 
   bool destroy = false;
 };
@@ -1384,7 +1441,7 @@ struct Game {
   Entity *ship;
 };
 
-void createShipLaser(Game *game);
+void createShipLaser(Game *game, float xOffset);
 void createEnemyShipLaser(Game *game, Point p);
 
 struct UserInputSystem {
@@ -1414,7 +1471,27 @@ struct UserInputSystem {
       i->fireDelayTicks--;
     }
     if (i->continueFiring && i->fireDelayTicks == 0) {
-      createShipLaser(game);
+
+      int numLaserPoweUpsCollected = 0;
+      for (auto up : game->ship->powerUps) {
+        numLaserPoweUpsCollected++;
+      }
+
+      switch (numLaserPoweUpsCollected) {
+        case 0:
+          createShipLaser(game, 0);
+          break;
+        case 1:
+          createShipLaser(game, -0.02f);
+          createShipLaser(game,  0.02f);
+          break;
+        default:
+          createShipLaser(game, -0.04f);
+          createShipLaser(game,  0.00f);
+          createShipLaser(game,  0.04f);
+          break;
+      }
+
       i->fireDelayTicks = SHIP_FIRE_DELAY_TICKS;
     }
   }
@@ -1533,21 +1610,29 @@ struct CollisionSystem {
   }
 
   void applyDamage(Game *game, Entity *a, Entity *b) {
-    if (a->sendsEnemyDamageOnCollision && b->receivesEnemyDamageOnCollision) {
-      if (a->selfDestructWhenSendingDamage) {
-        a->destroy = true;
-      }
-      if (b->selfDestructWhenReceivingDamage) {
-        b->destroy = true;
+
+    if (a->sendsDamage && b->receivesDamage) {
+      if (a->sendDamage.type == b->receiveDamage.type) {
+
+        if (a->sendDamage.destroyOnSend) {
+          a->destroy = true;
+        }
+        if (b->receiveDamage.destroyOnReceive) {
+          b->destroy = true;
+        }
       }
     }
-    if (a->sendsPlayerDamageOnCollision && b->receivesPlayerDamageOnCollision) {
-      if (a->selfDestructWhenSendingDamage) {
+  }
+
+  void applyPowerUps(Game *game, Entity *a, Entity *b) {
+
+    if (a->sendsPowerUps && b->receivesPowerUps) {
+
+      if (a->sendPowerUp.destroyOnSend) {
         a->destroy = true;
       }
-      if (b->selfDestructWhenReceivingDamage) {
-        b->destroy = true;
-      }
+
+      b->powerUps.push_back({.type = a->sendPowerUp.type});
     }
   }
 
@@ -1564,6 +1649,8 @@ struct CollisionSystem {
         continue; // don't process collisions with destroyed objects
       }
 
+      // TODO: these will become event listeners
+      applyPowerUps(game, c.a, c.b);
       applyDamage(game, c.a, c.b);
     }
   }
@@ -1644,14 +1731,17 @@ void createShip(Game *game) {
       .height = SHIP_HEIGHT,
     }
   });
-  ship->receivesPlayerDamageOnCollision = true;
-  ship->selfDestructWhenReceivingDamage = true;
+
+  ship->receivesDamage = true;
+  ship->receiveDamage = {.type = DAMAGE_PLAYER, .destroyOnReceive = true};
+
+  ship->receivesPowerUps = true;
 
   game->entities.push_back(ship);
   game->ship = ship;
 }
 
-void createShipLaser(Game *game) {
+void createShipLaser(Game *game, float xOffset) {
 
   Renderable r;
   r.type = R_RECT;
@@ -1660,7 +1750,7 @@ void createShipLaser(Game *game) {
   Point *shipP = &game->ship->transform.position;
 
   auto *e = new Entity();
-  e->transform.position = {.x = shipP->x, .y = shipP->y + 0.10f};
+  e->transform.position = {.x = shipP->x + xOffset, .y = shipP->y + 0.10f};
   e->hasVelocity = true;
   e->velocity.y = SHIP_LASER_SHOT_MOVE_SPEED;
   e->hasDestroyPositionConstraints = true;
@@ -1676,8 +1766,9 @@ void createShipLaser(Game *game) {
      .height = SHIP_LASER_SHOT_HEIGHT,
    }
   });
-  e->sendsEnemyDamageOnCollision = true;
-  e->selfDestructWhenSendingDamage = true;
+
+  e->sendsDamage = true;
+  e->sendDamage = {.type = DAMAGE_ENEMY, .destroyOnSend = true};
 
   game->entities.push_back(e);
 }
@@ -1717,10 +1808,11 @@ void createEnemyShip(Game *game) {
       .height = ENEMY_SHIP_HEIGHT,
     }
   });
-  e->receivesEnemyDamageOnCollision = true;
-  e->selfDestructWhenReceivingDamage = true;
-  e->sendsPlayerDamageOnCollision = true;
-  e->selfDestructWhenSendingDamage = true;
+
+  e->sendsDamage = true;
+  e->sendDamage = {.type = DAMAGE_PLAYER, .destroyOnSend = true};
+  e->receivesDamage = true;
+  e->receiveDamage = {.type = DAMAGE_ENEMY, .destroyOnReceive = true};
 
   e->hasEnemyAttack = true;
   e->enemyAttack.maxTicks = ENEMY_SHIP_FIRE_DELAY_TICKS;
@@ -1752,8 +1844,52 @@ void createEnemyShipLaser(Game *game, Point p) {
           .height = ENEMY_SHIP_LASER_SHOT_HEIGHT,
       }
   });
-  e->sendsPlayerDamageOnCollision = true;
-  e->selfDestructWhenSendingDamage = true;
+
+  e->sendsDamage = true;
+  e->sendDamage = {.type = DAMAGE_PLAYER, .destroyOnSend = true};
+
+  game->entities.push_back(e);
+}
+
+void createLaserPowerUp(Game *game) {
+
+  Renderable r;
+  r.type = R_RECT;
+  generalRectInit(&r.rect, game->f, LASER_POWER_UP_WIDTH / 2, LASER_POWER_UP_HEIGHT / 2, COLOR_BLUE);
+
+  Point p = randomPoint();
+  if (p.x < LASER_POWER_UP_MIN_X) {
+    p.x = LASER_POWER_UP_MIN_X;
+  }
+  else if (p.x > LASER_POWER_UP_MAX_X) {
+    p.x = LASER_POWER_UP_MAX_X;
+  }
+  p.y = 1 + LASER_POWER_UP_HALF_HEIGHT;
+
+  auto *e = new Entity();
+  e->transform.position = p;
+  e->hasVelocity = true;
+  e->velocity.y = -LASER_POWER_UP_MOVE_SPEED;
+  e->hasDestroyPositionConstraints = true;
+  e->destroyPositionConstraints = {
+      .minX = LASER_POWER_UP_MIN_X, .maxX = LASER_POWER_UP_MAX_X,
+      .minY = LASER_POWER_UP_MIN_Y, .maxY = LASER_POWER_UP_MAX_Y * 2
+  };
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+    .type = 0,
+    .rect = {
+        .x = -LASER_POWER_UP_HALF_WIDTH,
+        .y = LASER_POWER_UP_HALF_HEIGHT,
+        .width = LASER_POWER_UP_WIDTH,
+        .height = LASER_POWER_UP_HEIGHT,
+    }
+  });
+
+  e->sendsPowerUps = true;
+  e->sendPowerUp.destroyOnSend = true;
+  e->sendPowerUp.type = UP_LASER;
 
   game->entities.push_back(e);
 }
@@ -1813,12 +1949,12 @@ void gameTick(Game *game) {
   if (enemySpawnChance < 0.018f) {
     createEnemyShip(game);
   }
-//
-//  float laserUpChance = (((float)rand()) / ((float)RAND_MAX));
-//  if (laserUpChance < 0.010f) {
-//    game->laserPowerUpSys->spawn(game);
-//  }
-//
+
+  float laserUpChance = (((float)rand()) / ((float)RAND_MAX));
+  if (laserUpChance < 0.010f) {
+    createLaserPowerUp(game);
+  }
+
 //  float shieldUpChance = (((float)rand()) / ((float)RAND_MAX));
 //  if (shieldUpChance < 0.010f) {
 //    game->shieldPowerUpSys->spawn(game);
