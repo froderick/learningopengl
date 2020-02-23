@@ -218,6 +218,7 @@ struct GeneralImage {
 };
 
 unsigned int makeTexture(std::string file) {
+  stbi_set_flip_vertically_on_load(true);
   unsigned int texture;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture); // all upcoming GL_TEXTURE_2D operations now have effect on this texture object
@@ -234,7 +235,7 @@ unsigned int makeTexture(std::string file) {
   unsigned char *data = stbi_load(FileSystem::getPath(file).c_str(), &width, &height,
                                   &nrChannels, 0);
   if (data) {
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     glGenerateMipmap(GL_TEXTURE_2D);
   } else {
     std::cout << "Failed to load texture" << std::endl;
@@ -672,8 +673,8 @@ Entity* findShip(Game *game) {
 
 void createShip(Game *game) {
 
-  const float SHIP_MOVE_SPEED = .009f;
-  const float SHIP_HALF_WIDTH = 0.04f;
+  const float SHIP_MOVE_SPEED = .015f;
+  const float SHIP_HALF_WIDTH = 0.07f;
   const float SHIP_HALF_HEIGHT = 0.08f;
   const float SHIP_WIDTH = SHIP_HALF_WIDTH * 2;
   const float SHIP_HEIGHT = SHIP_HALF_HEIGHT * 2;
@@ -686,7 +687,7 @@ void createShip(Game *game) {
   Renderable shipRenderable;
 
   shipRenderable.type = R_IMAGE;
-  generalImageInit(&shipRenderable.image, game->imgFactory, "container.jpg", COLOR_BLUE, SHIP_WIDTH / 2, SHIP_HEIGHT / 2);
+  generalImageInit(&shipRenderable.image, game->imgFactory, "ship.png", COLOR_BLUE, SHIP_WIDTH / 2, SHIP_HEIGHT / 2);
 
   auto *ship = new Entity();
   ship->transform.position = {.x = 0, .y = -0.75};
