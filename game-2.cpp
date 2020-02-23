@@ -1190,9 +1190,25 @@ struct InventorySystem : CollisionHandler, DestroyHandler {
         a->destroy = true;
       }
 
-      if (a->sendPowerUp.confersShield && !b->inventory.shielded) {
-        b->inventory.shielded = true;
-        createShield(game, b);
+      if (a->sendPowerUp.confersShield) {
+        if (b->inventory.shielded == true) {
+
+          Entity *shield = nullptr;
+          for (auto f : b->transform.children) {
+            if (f->isInventoryItem && f->inventoryItem.confersShield && f->hasHealth) {
+              shield = f;
+              break;
+            }
+          }
+
+          if (shield != nullptr) {
+            shield->health.remainingHp = shield->health.maxHp;
+          }
+        }
+        else {
+          b->inventory.shielded = true;
+          createShield(game, b);
+        }
       }
 
       if (a->sendPowerUp.improvesLaser && b->inventory.laserLevel < 3) {
@@ -1345,10 +1361,6 @@ struct DestroySystem {
 
 struct RenderSystem {
 
-  static void render (Game * game, Entity *entity) {
-
-  }
-
   void render(Game *game) {
 
     for (auto e : game->entities) {
@@ -1377,7 +1389,7 @@ struct RenderSystem {
             }
             float hp = e->health.remainingHp;
             float ratioRemaining = hp / e->health.maxHp;
-            float thickness = 1.0f - (0.22 * ratioRemaining);
+            float thickness = 1.0f - (0.15 * ratioRemaining);
             generalCircleRenderThickness(&r.circle, p.x, p.y, thickness, game->aspectRatio);
             break;
           }
