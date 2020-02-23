@@ -203,6 +203,106 @@ void generalCircleRenderThickness(GeneralCircle *c, float x, float y, float thic
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 }
 
+struct GeneralImageFactory {
+  Shader *shader;
+};
+
+void generalImageFactoryInit(GeneralImageFactory *f) {
+  f->shader = new Shader("image.vert", "image.frag");
+}
+
+struct GeneralImage {
+  unsigned int VBO, VAO, EBO;
+  Shader *shader;
+  unsigned int texture;
+};
+
+unsigned int makeTexture(std::string file) {
+  unsigned int texture;
+  glGenTextures(1, &texture);
+  glBindTexture(GL_TEXTURE_2D, texture); // all upcoming GL_TEXTURE_2D operations now have effect on this texture object
+  // set the texture wrapping parameters
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                  GL_REPEAT);  // set texture wrapping to GL_REPEAT (default wrapping method)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  // set texture filtering parameters
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+   // load image, create texture and generate mipmaps
+  int width, height, nrChannels;
+  // The FileSystem::getPath(...) is part of the GitHub repository so we can find files on any IDE/platform; replace it with your own image path.
+  unsigned char *data = stbi_load(FileSystem::getPath(file).c_str(), &width, &height,
+                                  &nrChannels, 0);
+  if (data) {
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+  } else {
+    std::cout << "Failed to load texture" << std::endl;
+  }
+  stbi_image_free(data);
+  return texture;
+}
+
+void generalImageInit(GeneralImage *ctx, GeneralImageFactory *factory, std::string filePath, Color color, float width, float height) {
+
+  float vertices[] = {
+      // positions            // colors                 // texture coords
+      width,  height,  0.0f, color.r, color.g, color.b, 1.0f, 1.0f, // top right
+      width, -height,  0.0f, color.r, color.g, color.b, 1.0f, 0.0f, // bottom right
+      -width, -height, 0.0f, color.r, color.g, color.b, 0.0f, 0.0f, // bottom left
+      -width,  height, 0.0f, color.r, color.g, color.b, 0.0f, 1.0f  // top left
+  };
+  unsigned int indices[] = {
+      0, 1, 3, // first triangle
+      1, 2, 3  // second triangle
+  };
+  glGenVertexArrays(1, &ctx->VAO);
+  glGenBuffers(1, &ctx->VBO);
+  glGenBuffers(1, &ctx->EBO);
+
+  glBindVertexArray(ctx->VAO);
+
+  glBindBuffer(GL_ARRAY_BUFFER, ctx->VBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ctx->EBO);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+// position attribute
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) 0);
+  glEnableVertexAttribArray(0);
+// color attribute
+  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (3 * sizeof(float)));
+  glEnableVertexAttribArray(1);
+// texture coord attribute
+  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *) (6 * sizeof(float)));
+  glEnableVertexAttribArray(2);
+
+  ctx->shader = factory->shader;
+  ctx->texture = makeTexture(filePath);
+}
+
+void generalImageRender(GeneralImage *rect, float x, float y, float aspectRatio) {
+
+  rect->shader->use();
+  unsigned int transformLoc = glGetUniformLocation(rect->shader->ID, "transform");
+  unsigned int projectionLoc = glGetUniformLocation(rect->shader->ID, "projection");
+
+  glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
+  transform = glm::translate(transform, glm::vec3(x , y, 0.0f));
+
+  glm::mat4 projectionM = glm::mat4(1.0);
+  projectionM[1][1]  = aspectRatio;
+
+  glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(transform));
+  glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projectionM));
+
+  glBindTexture(GL_TEXTURE_2D, rect->texture);
+
+  glBindVertexArray(rect->VAO);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+}
+
 /*
  * stars
  */
@@ -418,6 +518,7 @@ enum RenderableType {
   R_RECT,
   R_CIRCLE,
   R_HEALTH_CIRCLE,
+  R_IMAGE,
 };
 
 struct Renderable {
@@ -425,6 +526,7 @@ struct Renderable {
   union {
     GeneralRect rect;
     GeneralCircle circle;
+    GeneralImage image;
   };
   Renderable() {}
 };
@@ -536,6 +638,8 @@ struct Game {
   float aspectRatio;
 
   GeneralRectFactory *f;
+  GeneralImageFactory *imgFactory;
+
   Stars stars;
   StarsRenderer starsRenderer;
 
@@ -580,8 +684,9 @@ void createShip(Game *game) {
   const int SHIP_FIRE_DELAY_TICKS = 8;
 
   Renderable shipRenderable;
-  shipRenderable.type = R_RECT;
-  generalRectInit(&shipRenderable.rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2, COLOR_LIGHT_GREY);
+
+  shipRenderable.type = R_IMAGE;
+  generalImageInit(&shipRenderable.image, game->imgFactory, "container.jpg", COLOR_BLUE, SHIP_WIDTH / 2, SHIP_HEIGHT / 2);
 
   auto *ship = new Entity();
   ship->transform.position = {.x = 0, .y = -0.75};
@@ -1393,6 +1498,9 @@ struct RenderSystem {
             generalCircleRenderThickness(&r.circle, p.x, p.y, thickness, game->aspectRatio);
             break;
           }
+          case R_IMAGE:
+            generalImageRender(&r.image, p.x, p.y, game->aspectRatio);
+            break;
           default:
             throw std::runtime_error("dunno render type");
         }
@@ -1412,6 +1520,9 @@ void gameInit(Game *game) {
 
   game->f = new GeneralRectFactory;
   generalRectFactoryInit(game->f);
+
+  game->imgFactory = new GeneralImageFactory;
+  generalImageFactoryInit(game->imgFactory);
 
   starsInit(&game->stars);
   starsRendererInit(&game->starsRenderer, game->f);
@@ -1613,6 +1724,8 @@ int main() {
 //  GeneralCircle c;
 //  generalCircleInit(&c, 0.5f, COLOR_PURPLE);
 
+//  GeneralImage *i = new GeneralImage();
+//  generalImageInit(i, game.imgFactory, "container.jpg", COLOR_BLUE, 0.1, 0.1);
 
   while (!glfwWindowShouldClose(window)) {
 
@@ -1624,6 +1737,8 @@ int main() {
     glClear(GL_COLOR_BUFFER_BIT);
 
     gameRender(&game);
+
+//    generalImageRender(i, 0.0, 0.0, 1);
 
 //    generalCircleRender(&c, 0.0f, 0.0f, game.aspectRatio);
 
