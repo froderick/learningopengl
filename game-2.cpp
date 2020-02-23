@@ -496,9 +496,18 @@ struct PlayerInput {
   int fireDelayTicks = 0;
 };
 
+enum CollideableType {
+  COLLIDE_NONE,
+  COLLIDE_RECT,
+  COLLIDE_CIRCLE,
+};
+
 struct Collideable {
-  int type;
-  Rect rect;
+  CollideableType type;
+  union {
+    Rect rect;
+    Circle circle;
+  };
 };
 
 enum RenderableType {
@@ -527,8 +536,8 @@ struct EnemyAttack {
  * Damage is applied on the basis of a SendsDamage entity colliding with a ReceivesDamage entity
  */
 enum DamageType {
-  DAMAGE_ENEMY,
-  DAMAGE_PLAYER,
+  DAMAGES_ENEMY,
+  DAMAGES_PLAYER,
 };
 struct SendDamage {
   DamageType type;
@@ -547,6 +556,7 @@ enum PowerUpType {
 };
 struct SendPowerUp {
   PowerUpType type;
+  int maxCount;
   bool destroyOnSend;
 };
 struct PowerUp {
@@ -767,8 +777,7 @@ void createShield(Game *game, Entity *e);
  */
 struct CollisionSystem {
 
-  Rect localRect(Entity *e, Collideable *c) {
-
+  Point absPosition(Entity *e) {
     Point p;
     if (e->transform.relativeTo == nullptr) {
       p = e->transform.position;
@@ -778,12 +787,25 @@ struct CollisionSystem {
       p.x += e->transform.position.x;
       p.y += e->transform.position.y;
     }
+    return p;
+  }
 
+  Rect absRect(Entity *e, Collideable *c) {
+    Point p = absPosition(e);
     return {
       .x = p.x + c->rect.x,
       .y = p.y + c->rect.y,
       .width = c->rect.width,
       .height = c->rect.height
+    };
+  }
+
+  Circle absCircle(Entity *e, Collideable *c) {
+    Point p = absPosition(e);
+    return {
+        .x = p.x + c->rect.x,
+        .y = p.y + c->rect.y,
+        .radius = c->circle.radius,
     };
   }
 
@@ -800,10 +822,27 @@ struct CollisionSystem {
             for (int j=0; j<entityB->collideables.size(); j++) {
               Collideable *compB = &entityB->collideables.at(j);
 
-              Rect localA = localRect(entityA, compA);
-              Rect localB = localRect(entityB, compB);
+              bool collides;
+              if (compA->type == COLLIDE_RECT && compB->type == COLLIDE_RECT) {
+                Rect localA = absRect(entityA, compA);
+                Rect localB = absRect(entityB, compB);
+                collides = rectsCollide(localA, localB);
+              }
+              else if (compA->type == COLLIDE_RECT && compB->type == COLLIDE_CIRCLE) {
+                Rect localA = absRect(entityA, compA);
+                Circle localB = absCircle(entityB, compB);
+                collides = circleRectCollide(localB, localA);
+              }
+              else if (compA->type == COLLIDE_CIRCLE && compB->type == COLLIDE_RECT) {
+                Circle localA = absCircle(entityA, compA);
+                Rect localB = absRect(entityB, compB);
+                collides = circleRectCollide(localA, localB);
+              }
+              else {
+                throw std::runtime_error("dunno collision combo");
+              }
 
-              if (rectsCollide(localA, localB)) {
+              if (collides) {
                 Collision c;
                 c.a = entityA;
                 c.b = entityB;
@@ -822,11 +861,6 @@ struct CollisionSystem {
   void applyDamage(Game *game, Entity *a, Entity *b) {
 
     Entity *ship = findShip(game);
-
-    if (a->isShield && b->isEnemy) {
-      printf("stop\n");
-      b->destroy = true;
-    }
 
     if (a->sendsDamage && b->receivesDamage) {
       if (a->sendDamage.type == b->receiveDamage.type) {
@@ -849,10 +883,19 @@ struct CollisionSystem {
         a->destroy = true;
       }
 
-      b->powerUps.push_back({.type = a->sendPowerUp.type});
+      int total = 0;
+      for (auto up : b->powerUps) {
+        if (up.type == a->sendPowerUp.type) {
+          total++;
+        }
+      }
+      if (total < a->sendPowerUp.maxCount) {
+        b->powerUps.push_back({.type = a->sendPowerUp.type});
 
-      if (a->sendPowerUp.type == UP_SHIELD) {
-        createShield(game, b);
+        // TODO: this should be an event
+        if (a->sendPowerUp.type == UP_SHIELD) {
+          createShield(game, b);
+        }
       }
     }
   }
@@ -916,10 +959,8 @@ struct DestroySystem {
       destroy = true;
     }
 
-    if (e->transform.children.size() > 0) {
-      for (auto child : e->transform.children) {
-        markDestroyedEntities(child, destroy);
-      }
+    for (auto child : e->transform.children) {
+      markDestroyedEntities(child, destroy);
     }
   }
 
@@ -1006,7 +1047,7 @@ void createShip(Game *game) {
   ship->renderables.push_back(shipRenderable);
 
   ship->collideables.push_back({
-    .type = 0,
+    .type = COLLIDE_RECT,
     .rect = {
       .x = -SHIP_HALF_WIDTH,
       .y = SHIP_HALF_HEIGHT,
@@ -1016,7 +1057,7 @@ void createShip(Game *game) {
   });
 
   ship->receivesDamage = true;
-  ship->receiveDamage = {.type = DAMAGE_PLAYER, .destroyOnReceive = true};
+  ship->receiveDamage = {.type = DAMAGES_PLAYER, .destroyOnReceive = true};
 
   ship->receivesPowerUps = true;
 
@@ -1045,7 +1086,7 @@ void createShipLaser(Game *game, float xOffset) {
   e->renderables.push_back(r);
 
   e->collideables.push_back({
-   .type = 0,
+   .type = COLLIDE_RECT,
    .rect = {
      .x = -SHIP_LASER_SHOT_HALF_WIDTH,
      .y = SHIP_LASER_SHOT_HALF_HEIGHT,
@@ -1055,12 +1096,12 @@ void createShipLaser(Game *game, float xOffset) {
   });
 
   e->sendsDamage = true;
-  e->sendDamage = {.type = DAMAGE_ENEMY, .destroyOnSend = true};
+  e->sendDamage = {.type = DAMAGES_ENEMY, .destroyOnSend = true};
 
   game->entities.push_back(e);
 }
 
-void createEnemyShip(Game *game) {
+Entity* createEnemyShip(Game *game) {
 
   Renderable r;
   r.type = R_RECT;
@@ -1087,7 +1128,7 @@ void createEnemyShip(Game *game) {
   e->renderables.push_back(r);
 
   e->collideables.push_back({
-    .type = 0,
+    .type = COLLIDE_RECT,
     .rect = {
       .x = -ENEMY_SHIP_HALF_WIDTH,
       .y = ENEMY_SHIP_HALF_HEIGHT,
@@ -1097,9 +1138,9 @@ void createEnemyShip(Game *game) {
   });
 
   e->sendsDamage = true;
-  e->sendDamage = {.type = DAMAGE_PLAYER, .destroyOnSend = true};
+  e->sendDamage = {.type = DAMAGES_PLAYER, .destroyOnSend = true};
   e->receivesDamage = true;
-  e->receiveDamage = {.type = DAMAGE_ENEMY, .destroyOnReceive = true};
+  e->receiveDamage = {.type = DAMAGES_ENEMY, .destroyOnReceive = true};
 
   e->hasEnemyAttack = true;
   e->enemyAttack.maxTicks = ENEMY_SHIP_FIRE_DELAY_TICKS;
@@ -1108,6 +1149,8 @@ void createEnemyShip(Game *game) {
   e->isEnemy = true;
 
   game->entities.push_back(e);
+
+  return e;
 }
 
 void createEnemyShipLaser(Game *game, Point p) {
@@ -1125,7 +1168,7 @@ void createEnemyShipLaser(Game *game, Point p) {
   e->renderables.push_back(r);
 
   e->collideables.push_back({
-      .type = 0,
+      .type = COLLIDE_RECT,
       .rect = {
           .x = -ENEMY_SHIP_LASER_SHOT_HALF_WIDTH,
           .y = ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT,
@@ -1135,7 +1178,9 @@ void createEnemyShipLaser(Game *game, Point p) {
   });
 
   e->sendsDamage = true;
-  e->sendDamage = {.type = DAMAGE_PLAYER, .destroyOnSend = true};
+  e->sendDamage = {.type = DAMAGES_PLAYER, .destroyOnSend = true};
+  e->receivesDamage = true;
+  e->receiveDamage = {.type = DAMAGES_ENEMY, .destroyOnReceive = true};
 
   game->entities.push_back(e);
 }
@@ -1167,7 +1212,7 @@ void createLaserPowerUp(Game *game) {
   e->renderables.push_back(r);
 
   e->collideables.push_back({
-    .type = 0,
+    .type = COLLIDE_RECT,
     .rect = {
         .x = -LASER_POWER_UP_HALF_WIDTH,
         .y = LASER_POWER_UP_HALF_HEIGHT,
@@ -1179,6 +1224,7 @@ void createLaserPowerUp(Game *game) {
   e->sendsPowerUps = true;
   e->sendPowerUp.destroyOnSend = true;
   e->sendPowerUp.type = UP_LASER;
+  e->sendPowerUp.maxCount = 3;
 
   game->entities.push_back(e);
 }
@@ -1210,7 +1256,7 @@ void createShieldPowerUp(Game *game) {
   e->renderables.push_back(r);
 
   e->collideables.push_back({
-    .type = 0,
+    .type = COLLIDE_RECT,
     .rect = {
       .x = -SHIELD_POWER_UP_HALF_WIDTH,
       .y = SHIELD_POWER_UP_HALF_HEIGHT,
@@ -1222,6 +1268,7 @@ void createShieldPowerUp(Game *game) {
   e->sendsPowerUps = true;
   e->sendPowerUp.destroyOnSend = true;
   e->sendPowerUp.type = UP_SHIELD;
+  e->sendPowerUp.maxCount = 1;
 
   game->entities.push_back(e);
 }
@@ -1239,21 +1286,16 @@ void createShield(Game *game, Entity *parent) {
   e->renderables.push_back(r);
 
   e->collideables.push_back({
-     .type = 0,
-     .rect = {
-         .x = -SHIELD_RADIUS,
-         .y = SHIELD_RADIUS,
-         .width = SHIELD_DIAMETER,
-         .height = SHIELD_DIAMETER,
+     .type = COLLIDE_CIRCLE,
+     .circle = {
+         .x = 0,
+         .y = 0,
+         .radius = SHIELD_RADIUS,
      }
   });
 
   e->sendsDamage = true;
-  e->sendDamage = {.type = DAMAGE_ENEMY};
-
-  e->sendsPowerUps = true;
-  e->sendPowerUp.destroyOnSend = true;
-  e->sendPowerUp.type = UP_SHIELD;
+  e->sendDamage = {.type = DAMAGES_ENEMY};
 
   e->isShield = true;
 
@@ -1280,6 +1322,12 @@ void gameInit(Game *game) {
   game->enemyAttackSystem = new EnemyAttackSystem();
 
   createShip(game);
+
+//  createShield(game, findShip(game));
+//  Entity *enemy = createEnemyShip(game);
+//  enemy->transform.position = {.x = 0, .y = 0};
+//  enemy->hasVelocity = false;
+//  enemy->hasEnemyAttack = false;
 
 }
 
