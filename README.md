@@ -12,3 +12,27 @@ brew install glfw glew glm
 
 At this point I had a purple triangle on the screen, yay.
 
+/*
+
+ transform -> relative position
+ children -> holds references to child entities
+ collides -> fires collision events
+ health -> has hp, can receive damage, loses hp on damage, destroys when hp=0
+ applies-collision-damage -> applies damage to things that take collision damage
+ takes-collision-damage -> takes damage when colliding with things that apply collision damage
+ absorbs-damage
+ expires -> self-destructs after time
+ power-up -> specifies the type of power up this is
+
+ applies-collision-child -> on collision, adds a child entity to the thing it collides with
+
+ */
+
+// TODO: these components are too concrete, there should be more decomposed things like
+//  - Transform - x/y coordinates + rotation + optionally relative to another entity
+//  - Collidable - local x/y/width/height coordinates, subject to transformation before eval
+//  - Velocity - x/y movement vectors
+//  - ZigZagMovement
+//  - SpiralMovement
+//  - RelativeMovement
+// Velocity, AINav, etc

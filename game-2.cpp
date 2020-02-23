@@ -353,96 +353,7 @@ bool pointIsOffScreen(Point p) {
 
 // top-level game //////////////////
 
-
-#define DEFAULT_WINDOW_WIDTH 640
-#define DEFAULT_WINDOW_HEIGHT 640
-
-const float SHIP_MOVE_SPEED = .009f;
-const float SHIP_HALF_WIDTH = 0.04f;
-const float SHIP_HALF_HEIGHT = 0.08f;
-const float SHIP_WIDTH = SHIP_HALF_WIDTH * 2;
-const float SHIP_HEIGHT = SHIP_HALF_HEIGHT * 2;
-const float SHIP_MIN_X = -1 + SHIP_HALF_WIDTH;
-const float SHIP_MAX_X = 1 - SHIP_HALF_WIDTH;
-const float SHIP_MIN_Y = -1 + SHIP_HALF_HEIGHT;
-const float SHIP_MAX_Y = 1 - SHIP_HALF_HEIGHT;
-const int SHIP_FIRE_DELAY_TICKS = 8;
-
-const float SHIP_LASER_SHOT_MOVE_SPEED = .02f;
-const float SHIP_LASER_SHOT_HALF_WIDTH = 0.004f;
-const float SHIP_LASER_SHOT_HALF_HEIGHT = 0.02f;
-const float SHIP_LASER_SHOT_WIDTH = SHIP_LASER_SHOT_HALF_WIDTH * 2;
-const float SHIP_LASER_SHOT_HEIGHT = SHIP_LASER_SHOT_HALF_HEIGHT * 2;
-
-const float ENEMY_SHIP_MOVE_SPEED = .005f;
-const float ENEMY_SHIP_HALF_WIDTH = 0.03f;
-const float ENEMY_SHIP_HALF_HEIGHT = 0.06f;
-const float ENEMY_SHIP_WIDTH = ENEMY_SHIP_HALF_WIDTH * 2;
-const float ENEMY_SHIP_HEIGHT = ENEMY_SHIP_HALF_HEIGHT * 2;
-const float ENEMY_SHIP_MIN_X = -1 + ENEMY_SHIP_HALF_WIDTH;
-const float ENEMY_SHIP_MAX_X = 1 - ENEMY_SHIP_HALF_WIDTH;
-const float ENEMY_SHIP_MIN_Y = -(1 + ENEMY_SHIP_HEIGHT);
-const float ENEMY_SHIP_MAX_Y = 1 + ENEMY_SHIP_HEIGHT;
-const float ENEMY_SHIP_FIRE_DELAY_TICKS = 300;
-
-const float ENEMY_SHIP_LASER_SHOT_MOVE_SPEED = .02f;
-const float ENEMY_SHIP_LASER_SHOT_HALF_WIDTH = 0.003f;
-const float ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT = 0.01f;
-const float ENEMY_SHIP_LASER_SHOT_WIDTH = ENEMY_SHIP_LASER_SHOT_HALF_WIDTH * 2;
-const float ENEMY_SHIP_LASER_SHOT_HEIGHT = ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT * 2;
-
-
-const float LASER_POWER_UP_MOVE_SPEED = .009f;
-const float LASER_POWER_UP_HALF_WIDTH = 0.03f;
-const float LASER_POWER_UP_HALF_HEIGHT = 0.03f;
-const float LASER_POWER_UP_WIDTH = LASER_POWER_UP_HALF_WIDTH * 2;
-const float LASER_POWER_UP_HEIGHT = LASER_POWER_UP_HALF_HEIGHT * 2;
-const float LASER_POWER_UP_MIN_X = -1 + LASER_POWER_UP_HALF_WIDTH;
-const float LASER_POWER_UP_MAX_X = 1 - LASER_POWER_UP_HALF_WIDTH;
-const float LASER_POWER_UP_MIN_Y = -1 + LASER_POWER_UP_HALF_HEIGHT;
-const float LASER_POWER_UP_MAX_Y = 1 - LASER_POWER_UP_HALF_HEIGHT;
-
-const float SHIELD_POWER_UP_MOVE_SPEED = .009f;
-const float SHIELD_POWER_UP_HALF_WIDTH = 0.03f;
-const float SHIELD_POWER_UP_HALF_HEIGHT = 0.03f;
-const float SHIELD_POWER_UP_WIDTH = SHIELD_POWER_UP_HALF_WIDTH * 2;
-const float SHIELD_POWER_UP_HEIGHT = SHIELD_POWER_UP_HALF_HEIGHT * 2;
-const float SHIELD_POWER_UP_MIN_X = -1 + SHIELD_POWER_UP_HALF_WIDTH;
-const float SHIELD_POWER_UP_MAX_X = 1 - SHIELD_POWER_UP_HALF_WIDTH;
-const float SHIELD_POWER_UP_MIN_Y = -1 + SHIELD_POWER_UP_HALF_HEIGHT;
-const float SHIELD_POWER_UP_MAX_Y = 1 - SHIELD_POWER_UP_HALF_HEIGHT;
-
-const float SHIELD_RADIUS = 0.15f;
-const float SHIELD_DIAMETER = SHIELD_RADIUS * 2;
-const float SHIELD_TICKS = 60 * 5;
-
-struct Game;
 struct Entity;
-
-/*
-
- transform -> relative position
- children -> holds references to child entities
- collides -> fires collision events
- health -> has hp, can receive damage, loses hp on damage, destroys when hp=0
- applies-collision-damage -> applies damage to things that take collision damage
- takes-collision-damage -> takes damage when colliding with things that apply collision damage
- absorbs-damage
- expires -> self-destructs after time
- power-up -> specifies the type of power up this is
-
- applies-collision-child -> on collision, adds a child entity to the thing it collides with
-
- */
-
-// TODO: these components are too concrete, there should be more decomposed things like
-//  - Transform - x/y coordinates + rotation + optionally relative to another entity
-//  - Collidable - local x/y/width/height coordinates, subject to transformation before eval
-//  - Velocity - x/y movement vectors
-//  - ZigZagMovement
-//  - SpiralMovement
-//  - RelativeMovement
-// Velocity, AINav, etc
 
 struct Transform {
   Point position{};
@@ -460,7 +371,9 @@ struct PlayerInput {
   bool moveUp = false;
   bool moveDown = false;
   bool continueFiring = false;
-  int fireDelayTicks = 0;
+  int maxFireDelayTicks = 0;
+  int remainingFireDelayTicks = 0;
+  float moveSpeed = 0;
 };
 
 enum CollideableType {
@@ -604,12 +517,12 @@ struct Game {
   InventorySystem *inventorySystem;
   DamageSystem *damageSystem;
 
-  uint64_t objectIdCounter = 0;
   std::vector<Entity*> entities;
 };
 
-void createShipLaser(Game *game, float xOffset);
-void createEnemyShipLaser(Game *game, Point p);
+/*
+ * entity factories
+ */
 
 Entity* findShip(Game *game) {
   Entity *ship = nullptr;
@@ -620,6 +533,338 @@ Entity* findShip(Game *game) {
     }
   }
   return ship;
+}
+
+void createShip(Game *game) {
+
+  const float SHIP_MOVE_SPEED = .009f;
+  const float SHIP_HALF_WIDTH = 0.04f;
+  const float SHIP_HALF_HEIGHT = 0.08f;
+  const float SHIP_WIDTH = SHIP_HALF_WIDTH * 2;
+  const float SHIP_HEIGHT = SHIP_HALF_HEIGHT * 2;
+  const float SHIP_MIN_X = -1 + SHIP_HALF_WIDTH;
+  const float SHIP_MAX_X = 1 - SHIP_HALF_WIDTH;
+  const float SHIP_MIN_Y = -1 + SHIP_HALF_HEIGHT;
+  const float SHIP_MAX_Y = 1 - SHIP_HALF_HEIGHT;
+  const int SHIP_FIRE_DELAY_TICKS = 8;
+
+  Renderable shipRenderable;
+  shipRenderable.type = R_RECT;
+  generalRectInit(&shipRenderable.rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2, COLOR_LIGHT_GREY);
+
+  auto *ship = new Entity();
+  ship->transform.position = {.x = 0, .y = -0.75};
+  ship->hasVelocity = true;
+  ship->hasPlayerInput = true;
+  ship->playerInput.moveSpeed = SHIP_MOVE_SPEED;
+  ship->playerInput.maxFireDelayTicks = SHIP_FIRE_DELAY_TICKS;
+  ship->hasAbsolutePositionConstraints = true;
+  ship->absolutePositionConstraints = {.minX = SHIP_MIN_X, .maxX = SHIP_MAX_X, .minY = SHIP_MIN_Y, .maxY = SHIP_MAX_Y};
+  ship->renderables.push_back(shipRenderable);
+
+  ship->collideables.push_back({
+                                   .type = COLLIDE_RECT,
+                                   .rect = {
+                                       .x = -SHIP_HALF_WIDTH,
+                                       .y = SHIP_HALF_HEIGHT,
+                                       .width = SHIP_WIDTH,
+                                       .height = SHIP_HEIGHT,
+                                   }
+                               });
+
+  ship->receivesDamage = true;
+  ship->receiveDamage = {.type = DAMAGES_PLAYER, .destroyOnReceive = true};
+
+  ship->hasInventory = true;
+  ship->inventory = {.laserLevel = 1, .shielded = false};
+
+  game->entities.push_back(ship);
+}
+
+void createShipLaser(Game *game, float xOffset) {
+
+  const float SHIP_LASER_SHOT_MOVE_SPEED = .02f;
+  const float SHIP_LASER_SHOT_HALF_WIDTH = 0.004f;
+  const float SHIP_LASER_SHOT_HALF_HEIGHT = 0.02f;
+  const float SHIP_LASER_SHOT_WIDTH = SHIP_LASER_SHOT_HALF_WIDTH * 2;
+  const float SHIP_LASER_SHOT_HEIGHT = SHIP_LASER_SHOT_HALF_HEIGHT * 2;
+
+  Renderable r;
+  r.type = R_RECT;
+  generalRectInit(&r.rect, game->f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT, COLOR_YELLOW);
+
+  Entity *ship = findShip(game);
+  if (ship == nullptr) {
+    return; // no ship
+  }
+
+  Point *shipP = &ship->transform.position;
+
+  auto *e = new Entity();
+  e->transform.position = {.x = shipP->x + xOffset, .y = shipP->y + 0.10f};
+  e->hasVelocity = true;
+  e->velocity.y = SHIP_LASER_SHOT_MOVE_SPEED;
+  e->hasDestroyPositionConstraints = true;
+  e->destroyPositionConstraints = {.minX = -1, .maxX = 1, .minY = -1, .maxY = 1};
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+                                .type = COLLIDE_RECT,
+                                .rect = {
+                                    .x = -SHIP_LASER_SHOT_HALF_WIDTH,
+                                    .y = SHIP_LASER_SHOT_HALF_HEIGHT,
+                                    .width = SHIP_LASER_SHOT_WIDTH,
+                                    .height = SHIP_LASER_SHOT_HEIGHT,
+                                }
+                            });
+
+  e->sendsDamage = true;
+  e->sendDamage = {.type = DAMAGES_ENEMY, .destroyOnSend = true};
+
+  game->entities.push_back(e);
+}
+
+Entity* createEnemyShip(Game *game) {
+
+  const float ENEMY_SHIP_MOVE_SPEED = .005f;
+  const float ENEMY_SHIP_HALF_WIDTH = 0.03f;
+  const float ENEMY_SHIP_HALF_HEIGHT = 0.06f;
+  const float ENEMY_SHIP_WIDTH = ENEMY_SHIP_HALF_WIDTH * 2;
+  const float ENEMY_SHIP_HEIGHT = ENEMY_SHIP_HALF_HEIGHT * 2;
+  const float ENEMY_SHIP_MIN_X = -1 + ENEMY_SHIP_HALF_WIDTH;
+  const float ENEMY_SHIP_MAX_X = 1 - ENEMY_SHIP_HALF_WIDTH;
+  const float ENEMY_SHIP_MIN_Y = -(1 + ENEMY_SHIP_HEIGHT);
+  const float ENEMY_SHIP_MAX_Y = 1 + ENEMY_SHIP_HEIGHT;
+  const float ENEMY_SHIP_FIRE_DELAY_TICKS = 300;
+
+  Renderable r;
+  r.type = R_RECT;
+  generalRectInit(&r.rect, game->f, ENEMY_SHIP_WIDTH/ 2, ENEMY_SHIP_HEIGHT/ 2, COLOR_GREEN);
+
+  Point p = randomPoint();
+  if (p.x < ENEMY_SHIP_MIN_X) {
+    p.x = ENEMY_SHIP_MIN_X;
+  }
+  else if (p.x > ENEMY_SHIP_MAX_X) {
+    p.x = ENEMY_SHIP_MAX_X;
+  }
+  p.y = 1 + ENEMY_SHIP_HALF_HEIGHT;
+
+  auto *e = new Entity();
+  e->transform.position = p;
+  e->hasVelocity = true;
+  e->velocity.y = -ENEMY_SHIP_MOVE_SPEED;
+  e->hasDestroyPositionConstraints = true;
+  e->destroyPositionConstraints = {
+      .minX = ENEMY_SHIP_MIN_X, .maxX = ENEMY_SHIP_MAX_X,
+      .minY = ENEMY_SHIP_MIN_Y, .maxY = ENEMY_SHIP_MAX_Y * 2
+  };
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+                                .type = COLLIDE_RECT,
+                                .rect = {
+                                    .x = -ENEMY_SHIP_HALF_WIDTH,
+                                    .y = ENEMY_SHIP_HALF_HEIGHT,
+                                    .width = ENEMY_SHIP_WIDTH,
+                                    .height = ENEMY_SHIP_HEIGHT,
+                                }
+                            });
+
+  e->sendsDamage = true;
+  e->sendDamage = {.type = DAMAGES_PLAYER, .destroyOnSend = true};
+  e->receivesDamage = true;
+  e->receiveDamage = {.type = DAMAGES_ENEMY, .destroyOnReceive = true};
+
+  e->hasEnemyAttack = true;
+  e->enemyAttack.maxTicks = ENEMY_SHIP_FIRE_DELAY_TICKS;
+  e->enemyAttack.ticksRemaining = 0;
+
+  e->isEnemy = true;
+
+  game->entities.push_back(e);
+
+  return e;
+}
+
+void createEnemyShipLaser(Game *game, Point p) {
+
+  const float ENEMY_SHIP_LASER_SHOT_MOVE_SPEED = .02f;
+  const float ENEMY_SHIP_LASER_SHOT_HALF_WIDTH = 0.003f;
+  const float ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT = 0.01f;
+  const float ENEMY_SHIP_LASER_SHOT_WIDTH = ENEMY_SHIP_LASER_SHOT_HALF_WIDTH * 2;
+  const float ENEMY_SHIP_LASER_SHOT_HEIGHT = ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT * 2;
+
+  Renderable r;
+  r.type = R_RECT;
+  generalRectInit(&r.rect, game->f, ENEMY_SHIP_LASER_SHOT_WIDTH, ENEMY_SHIP_LASER_SHOT_HEIGHT, COLOR_RED);
+
+  auto *e = new Entity();
+  e->transform.position = {.x = p.x, .y = p.y - 0.10f};
+  e->hasVelocity = true;
+  e->velocity.y = -ENEMY_SHIP_LASER_SHOT_MOVE_SPEED;
+  e->hasDestroyPositionConstraints = true;
+  e->destroyPositionConstraints = {.minX = -1, .maxX = 1, .minY = -1, .maxY = 1};
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+                                .type = COLLIDE_RECT,
+                                .rect = {
+                                    .x = -ENEMY_SHIP_LASER_SHOT_HALF_WIDTH,
+                                    .y = ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT,
+                                    .width = ENEMY_SHIP_LASER_SHOT_WIDTH,
+                                    .height = ENEMY_SHIP_LASER_SHOT_HEIGHT,
+                                }
+                            });
+
+  e->sendsDamage = true;
+  e->sendDamage = {.type = DAMAGES_PLAYER, .destroyOnSend = true};
+  e->receivesDamage = true;
+  e->receiveDamage = {.type = DAMAGES_ENEMY, .destroyOnReceive = true};
+
+  game->entities.push_back(e);
+}
+
+void createLaserPowerUp(Game *game) {
+
+  const float LASER_POWER_UP_MOVE_SPEED = .009f;
+  const float LASER_POWER_UP_HALF_WIDTH = 0.03f;
+  const float LASER_POWER_UP_HALF_HEIGHT = 0.03f;
+  const float LASER_POWER_UP_WIDTH = LASER_POWER_UP_HALF_WIDTH * 2;
+  const float LASER_POWER_UP_HEIGHT = LASER_POWER_UP_HALF_HEIGHT * 2;
+  const float LASER_POWER_UP_MIN_X = -1 + LASER_POWER_UP_HALF_WIDTH;
+  const float LASER_POWER_UP_MAX_X = 1 - LASER_POWER_UP_HALF_WIDTH;
+  const float LASER_POWER_UP_MIN_Y = -1 + LASER_POWER_UP_HALF_HEIGHT;
+  const float LASER_POWER_UP_MAX_Y = 1 - LASER_POWER_UP_HALF_HEIGHT;
+
+  Renderable r;
+  r.type = R_RECT;
+  generalRectInit(&r.rect, game->f, LASER_POWER_UP_WIDTH / 2, LASER_POWER_UP_HEIGHT / 2, COLOR_BLUE);
+
+  Point p = randomPoint();
+  if (p.x < LASER_POWER_UP_MIN_X) {
+    p.x = LASER_POWER_UP_MIN_X;
+  }
+  else if (p.x > LASER_POWER_UP_MAX_X) {
+    p.x = LASER_POWER_UP_MAX_X;
+  }
+  p.y = 1 + LASER_POWER_UP_HALF_HEIGHT;
+
+  auto *e = new Entity();
+  e->transform.position = p;
+  e->hasVelocity = true;
+  e->velocity.y = -LASER_POWER_UP_MOVE_SPEED;
+  e->hasDestroyPositionConstraints = true;
+  e->destroyPositionConstraints = {
+      .minX = LASER_POWER_UP_MIN_X, .maxX = LASER_POWER_UP_MAX_X,
+      .minY = LASER_POWER_UP_MIN_Y, .maxY = LASER_POWER_UP_MAX_Y * 2
+  };
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+                                .type = COLLIDE_RECT,
+                                .rect = {
+                                    .x = -LASER_POWER_UP_HALF_WIDTH,
+                                    .y = LASER_POWER_UP_HALF_HEIGHT,
+                                    .width = LASER_POWER_UP_WIDTH,
+                                    .height = LASER_POWER_UP_HEIGHT,
+                                }
+                            });
+
+  e->sendsPowerUps = true;
+  e->sendPowerUp.destroyOnSend = true;
+  e->sendPowerUp.improvesLaser = true;
+
+  game->entities.push_back(e);
+}
+
+void createShieldPowerUp(Game *game) {
+
+  const float SHIELD_POWER_UP_MOVE_SPEED = .009f;
+  const float SHIELD_POWER_UP_HALF_WIDTH = 0.03f;
+  const float SHIELD_POWER_UP_HALF_HEIGHT = 0.03f;
+  const float SHIELD_POWER_UP_WIDTH = SHIELD_POWER_UP_HALF_WIDTH * 2;
+  const float SHIELD_POWER_UP_HEIGHT = SHIELD_POWER_UP_HALF_HEIGHT * 2;
+  const float SHIELD_POWER_UP_MIN_X = -1 + SHIELD_POWER_UP_HALF_WIDTH;
+  const float SHIELD_POWER_UP_MAX_X = 1 - SHIELD_POWER_UP_HALF_WIDTH;
+  const float SHIELD_POWER_UP_MIN_Y = -1 + SHIELD_POWER_UP_HALF_HEIGHT;
+  const float SHIELD_POWER_UP_MAX_Y = 1 - SHIELD_POWER_UP_HALF_HEIGHT;
+
+  Renderable r;
+  r.type = R_RECT;
+  generalRectInit(&r.rect, game->f, SHIELD_POWER_UP_WIDTH / 2, SHIELD_POWER_UP_HEIGHT / 2, COLOR_PURPLE);
+
+  Point p = randomPoint();
+  if (p.x < SHIELD_POWER_UP_MIN_X) {
+    p.x = SHIELD_POWER_UP_MIN_X;
+  }
+  else if (p.x > SHIELD_POWER_UP_MAX_X) {
+    p.x = SHIELD_POWER_UP_MAX_X;
+  }
+  p.y = 1 + SHIELD_POWER_UP_HALF_HEIGHT;
+
+  auto *e = new Entity();
+  e->transform.position = p;
+  e->hasVelocity = true;
+  e->velocity.y = -SHIELD_POWER_UP_MOVE_SPEED;
+  e->hasDestroyPositionConstraints = true;
+  e->destroyPositionConstraints = {
+      .minX = SHIELD_POWER_UP_MIN_X, .maxX = SHIELD_POWER_UP_MAX_X,
+      .minY = SHIELD_POWER_UP_MIN_Y, .maxY = SHIELD_POWER_UP_MAX_Y * 2
+  };
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+                                .type = COLLIDE_RECT,
+                                .rect = {
+                                    .x = -SHIELD_POWER_UP_HALF_WIDTH,
+                                    .y = SHIELD_POWER_UP_HALF_HEIGHT,
+                                    .width = SHIELD_POWER_UP_WIDTH,
+                                    .height = SHIELD_POWER_UP_HEIGHT,
+                                }
+                            });
+
+  e->sendsPowerUps = true;
+  e->sendPowerUp.destroyOnSend = true;
+  e->sendPowerUp.confersShield = true;
+
+  game->entities.push_back(e);
+}
+
+void createShield(Game *game, Entity *parent) {
+
+  const float SHIELD_RADIUS = 0.15f;
+  const float SHIELD_DIAMETER = SHIELD_RADIUS * 2;
+  const float SHIELD_TICKS = 60 * 5;
+
+  Renderable r;
+  r.type = R_CIRCLE;
+  generalCircleInit(&r.circle, SHIELD_RADIUS, COLOR_PURPLE);
+
+  auto *e = new Entity();
+  e->transform.position = {.x = 0, .y = 0};
+  e->transform.relativeTo = parent;
+  parent->transform.children.push_back(e);
+  e->renderables.push_back(r);
+
+  e->collideables.push_back({
+                                .type = COLLIDE_CIRCLE,
+                                .circle = {
+                                    .x = 0,
+                                    .y = 0,
+                                    .radius = SHIELD_RADIUS,
+                                }
+                            });
+
+  e->sendsDamage = true;
+  e->sendDamage = {.type = DAMAGES_ENEMY};
+
+  e->isInventoryItem = true;
+  e->inventoryItem.confersShield = true;
+
+  e->isShield = true;
+
+  game->entities.push_back(e);
 }
 
 struct UserInputSystem {
@@ -636,25 +881,25 @@ struct UserInputSystem {
     Velocity *v = &ship->velocity;
 
     if (i->moveLeft) {
-      v->x = -SHIP_MOVE_SPEED;
+      v->x = -i->moveSpeed;
     } else if (i->moveRight) {
-      v->x = SHIP_MOVE_SPEED;
+      v->x = i->moveSpeed;
     } else {
       v->x = 0;
     }
 
     if (i->moveDown) {
-      v->y = -SHIP_MOVE_SPEED;
+      v->y = -i->moveSpeed;
     } else if (i->moveUp) {
-      v->y = SHIP_MOVE_SPEED;
+      v->y = i->moveSpeed;
     } else {
       v->y = 0;
     }
 
-    if (i->fireDelayTicks > 0) {
-      i->fireDelayTicks--;
+    if (i->remainingFireDelayTicks > 0) {
+      i->remainingFireDelayTicks--;
     }
-    if (i->continueFiring && i->fireDelayTicks == 0) {
+    if (i->continueFiring && i->remainingFireDelayTicks== 0) {
 
       switch (ship->inventory.laserLevel) {
         case 0:
@@ -671,7 +916,7 @@ struct UserInputSystem {
           break;
       }
 
-      i->fireDelayTicks = SHIP_FIRE_DELAY_TICKS;
+      i->remainingFireDelayTicks = i->maxFireDelayTicks;
     }
   }
 };
@@ -722,8 +967,6 @@ struct MovementSystem {
   }
 
 };
-
-void createShield(Game *game, Entity *e);
 
 /*
  * iterate over all entities, looking for collisions
@@ -1066,277 +1309,8 @@ struct RenderSystem {
   }
 };
 
-void createShip(Game *game) {
-
-  Renderable shipRenderable;
-  shipRenderable.type = R_RECT;
-  generalRectInit(&shipRenderable.rect, game->f, SHIP_WIDTH / 2, SHIP_HEIGHT / 2, COLOR_LIGHT_GREY);
-
-  auto *ship = new Entity();
-  ship->transform.position = {.x = 0, .y = -0.75};
-  ship->hasVelocity = true;
-  ship->hasPlayerInput = true;
-  ship->hasAbsolutePositionConstraints = true;
-  ship->absolutePositionConstraints = {.minX = SHIP_MIN_X, .maxX = SHIP_MAX_X, .minY = SHIP_MIN_Y, .maxY = SHIP_MAX_Y};
-  ship->renderables.push_back(shipRenderable);
-
-  ship->collideables.push_back({
-    .type = COLLIDE_RECT,
-    .rect = {
-      .x = -SHIP_HALF_WIDTH,
-      .y = SHIP_HALF_HEIGHT,
-      .width = SHIP_WIDTH,
-      .height = SHIP_HEIGHT,
-    }
-  });
-
-  ship->receivesDamage = true;
-  ship->receiveDamage = {.type = DAMAGES_PLAYER, .destroyOnReceive = true};
-
-  ship->hasInventory = true;
-  ship->inventory = {.laserLevel = 1, .shielded = false};
-
-  game->entities.push_back(ship);
-}
-
-void createShipLaser(Game *game, float xOffset) {
-
-  Renderable r;
-  r.type = R_RECT;
-  generalRectInit(&r.rect, game->f, SHIP_LASER_SHOT_WIDTH, SHIP_LASER_SHOT_HEIGHT, COLOR_YELLOW);
-
-  Entity *ship = findShip(game);
-  if (ship == nullptr) {
-    return; // no ship
-  }
-
-  Point *shipP = &ship->transform.position;
-
-  auto *e = new Entity();
-  e->transform.position = {.x = shipP->x + xOffset, .y = shipP->y + 0.10f};
-  e->hasVelocity = true;
-  e->velocity.y = SHIP_LASER_SHOT_MOVE_SPEED;
-  e->hasDestroyPositionConstraints = true;
-  e->destroyPositionConstraints = {.minX = -1, .maxX = 1, .minY = -1, .maxY = 1};
-  e->renderables.push_back(r);
-
-  e->collideables.push_back({
-   .type = COLLIDE_RECT,
-   .rect = {
-     .x = -SHIP_LASER_SHOT_HALF_WIDTH,
-     .y = SHIP_LASER_SHOT_HALF_HEIGHT,
-     .width = SHIP_LASER_SHOT_WIDTH,
-     .height = SHIP_LASER_SHOT_HEIGHT,
-   }
-  });
-
-  e->sendsDamage = true;
-  e->sendDamage = {.type = DAMAGES_ENEMY, .destroyOnSend = true};
-
-  game->entities.push_back(e);
-}
-
-Entity* createEnemyShip(Game *game) {
-
-  Renderable r;
-  r.type = R_RECT;
-  generalRectInit(&r.rect, game->f, ENEMY_SHIP_WIDTH/ 2, ENEMY_SHIP_HEIGHT/ 2, COLOR_GREEN);
-
-  Point p = randomPoint();
-  if (p.x < ENEMY_SHIP_MIN_X) {
-    p.x = ENEMY_SHIP_MIN_X;
-  }
-  else if (p.x > ENEMY_SHIP_MAX_X) {
-    p.x = ENEMY_SHIP_MAX_X;
-  }
-  p.y = 1 + ENEMY_SHIP_HALF_HEIGHT;
-
-  auto *e = new Entity();
-  e->transform.position = p;
-  e->hasVelocity = true;
-  e->velocity.y = -ENEMY_SHIP_MOVE_SPEED;
-  e->hasDestroyPositionConstraints = true;
-  e->destroyPositionConstraints = {
-    .minX = ENEMY_SHIP_MIN_X, .maxX = ENEMY_SHIP_MAX_X,
-    .minY = ENEMY_SHIP_MIN_Y, .maxY = ENEMY_SHIP_MAX_Y * 2
-  };
-  e->renderables.push_back(r);
-
-  e->collideables.push_back({
-    .type = COLLIDE_RECT,
-    .rect = {
-      .x = -ENEMY_SHIP_HALF_WIDTH,
-      .y = ENEMY_SHIP_HALF_HEIGHT,
-      .width = ENEMY_SHIP_WIDTH,
-      .height = ENEMY_SHIP_HEIGHT,
-    }
-  });
-
-  e->sendsDamage = true;
-  e->sendDamage = {.type = DAMAGES_PLAYER, .destroyOnSend = true};
-  e->receivesDamage = true;
-  e->receiveDamage = {.type = DAMAGES_ENEMY, .destroyOnReceive = true};
-
-  e->hasEnemyAttack = true;
-  e->enemyAttack.maxTicks = ENEMY_SHIP_FIRE_DELAY_TICKS;
-  e->enemyAttack.ticksRemaining = 0;
-
-  e->isEnemy = true;
-
-  game->entities.push_back(e);
-
-  return e;
-}
-
-void createEnemyShipLaser(Game *game, Point p) {
-
-  Renderable r;
-  r.type = R_RECT;
-  generalRectInit(&r.rect, game->f, ENEMY_SHIP_LASER_SHOT_WIDTH, ENEMY_SHIP_LASER_SHOT_HEIGHT, COLOR_RED);
-
-  auto *e = new Entity();
-  e->transform.position = {.x = p.x, .y = p.y - 0.10f};
-  e->hasVelocity = true;
-  e->velocity.y = -ENEMY_SHIP_LASER_SHOT_MOVE_SPEED;
-  e->hasDestroyPositionConstraints = true;
-  e->destroyPositionConstraints = {.minX = -1, .maxX = 1, .minY = -1, .maxY = 1};
-  e->renderables.push_back(r);
-
-  e->collideables.push_back({
-      .type = COLLIDE_RECT,
-      .rect = {
-          .x = -ENEMY_SHIP_LASER_SHOT_HALF_WIDTH,
-          .y = ENEMY_SHIP_LASER_SHOT_HALF_HEIGHT,
-          .width = ENEMY_SHIP_LASER_SHOT_WIDTH,
-          .height = ENEMY_SHIP_LASER_SHOT_HEIGHT,
-      }
-  });
-
-  e->sendsDamage = true;
-  e->sendDamage = {.type = DAMAGES_PLAYER, .destroyOnSend = true};
-  e->receivesDamage = true;
-  e->receiveDamage = {.type = DAMAGES_ENEMY, .destroyOnReceive = true};
-
-  game->entities.push_back(e);
-}
-
-void createLaserPowerUp(Game *game) {
-
-  Renderable r;
-  r.type = R_RECT;
-  generalRectInit(&r.rect, game->f, LASER_POWER_UP_WIDTH / 2, LASER_POWER_UP_HEIGHT / 2, COLOR_BLUE);
-
-  Point p = randomPoint();
-  if (p.x < LASER_POWER_UP_MIN_X) {
-    p.x = LASER_POWER_UP_MIN_X;
-  }
-  else if (p.x > LASER_POWER_UP_MAX_X) {
-    p.x = LASER_POWER_UP_MAX_X;
-  }
-  p.y = 1 + LASER_POWER_UP_HALF_HEIGHT;
-
-  auto *e = new Entity();
-  e->transform.position = p;
-  e->hasVelocity = true;
-  e->velocity.y = -LASER_POWER_UP_MOVE_SPEED;
-  e->hasDestroyPositionConstraints = true;
-  e->destroyPositionConstraints = {
-      .minX = LASER_POWER_UP_MIN_X, .maxX = LASER_POWER_UP_MAX_X,
-      .minY = LASER_POWER_UP_MIN_Y, .maxY = LASER_POWER_UP_MAX_Y * 2
-  };
-  e->renderables.push_back(r);
-
-  e->collideables.push_back({
-    .type = COLLIDE_RECT,
-    .rect = {
-        .x = -LASER_POWER_UP_HALF_WIDTH,
-        .y = LASER_POWER_UP_HALF_HEIGHT,
-        .width = LASER_POWER_UP_WIDTH,
-        .height = LASER_POWER_UP_HEIGHT,
-    }
-  });
-
-  e->sendsPowerUps = true;
-  e->sendPowerUp.destroyOnSend = true;
-  e->sendPowerUp.improvesLaser = true;
-
-  game->entities.push_back(e);
-}
-
-void createShieldPowerUp(Game *game) {
-
-  Renderable r;
-  r.type = R_RECT;
-  generalRectInit(&r.rect, game->f, SHIELD_POWER_UP_WIDTH / 2, SHIELD_POWER_UP_HEIGHT / 2, COLOR_PURPLE);
-
-  Point p = randomPoint();
-  if (p.x < SHIELD_POWER_UP_MIN_X) {
-    p.x = SHIELD_POWER_UP_MIN_X;
-  }
-  else if (p.x > SHIELD_POWER_UP_MAX_X) {
-    p.x = SHIELD_POWER_UP_MAX_X;
-  }
-  p.y = 1 + SHIELD_POWER_UP_HALF_HEIGHT;
-
-  auto *e = new Entity();
-  e->transform.position = p;
-  e->hasVelocity = true;
-  e->velocity.y = -SHIELD_POWER_UP_MOVE_SPEED;
-  e->hasDestroyPositionConstraints = true;
-  e->destroyPositionConstraints = {
-      .minX = SHIELD_POWER_UP_MIN_X, .maxX = SHIELD_POWER_UP_MAX_X,
-      .minY = SHIELD_POWER_UP_MIN_Y, .maxY = SHIELD_POWER_UP_MAX_Y * 2
-  };
-  e->renderables.push_back(r);
-
-  e->collideables.push_back({
-    .type = COLLIDE_RECT,
-    .rect = {
-      .x = -SHIELD_POWER_UP_HALF_WIDTH,
-      .y = SHIELD_POWER_UP_HALF_HEIGHT,
-      .width = SHIELD_POWER_UP_WIDTH,
-      .height = SHIELD_POWER_UP_HEIGHT,
-    }
-  });
-
-  e->sendsPowerUps = true;
-  e->sendPowerUp.destroyOnSend = true;
-  e->sendPowerUp.confersShield = true;
-
-  game->entities.push_back(e);
-}
-
-void createShield(Game *game, Entity *parent) {
-
-  Renderable r;
-  r.type = R_CIRCLE;
-  generalCircleInit(&r.circle, SHIELD_RADIUS, COLOR_PURPLE);
-
-  auto *e = new Entity();
-  e->transform.position = {.x = 0, .y = 0};
-  e->transform.relativeTo = parent;
-  parent->transform.children.push_back(e);
-  e->renderables.push_back(r);
-
-  e->collideables.push_back({
-     .type = COLLIDE_CIRCLE,
-     .circle = {
-         .x = 0,
-         .y = 0,
-         .radius = SHIELD_RADIUS,
-     }
-  });
-
-  e->sendsDamage = true;
-  e->sendDamage = {.type = DAMAGES_ENEMY};
-
-  e->isInventoryItem = true;
-  e->inventoryItem.confersShield = true;
-
-  e->isShield = true;
-
-  game->entities.push_back(e);
-}
+#define DEFAULT_WINDOW_WIDTH 640
+#define DEFAULT_WINDOW_HEIGHT 640
 
 void gameInit(Game *game) {
 
