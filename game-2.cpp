@@ -115,6 +115,7 @@ void generalRectRender(GeneralRect *rect, float x, float y, float aspectRatio) {
 struct GeneralCircle {
   unsigned int VBO, VAO, EBO;
   Shader *shader;
+  float width;
 };
 
 void generalCircleInit(GeneralCircle *ctx, float radius, Color color) {
@@ -165,6 +166,7 @@ void generalCircleRender(GeneralCircle *c, float x, float y, float aspectRatio) 
   c->shader->use();
   unsigned int transformLoc = glGetUniformLocation(c->shader->ID, "transform");
   unsigned int projectionLoc = glGetUniformLocation(c->shader->ID, "projection");
+  unsigned int thicknessLoc = glGetUniformLocation(c->shader->ID, "thickness");
 
   glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
   transform = glm::translate(transform, glm::vec3(x , y, 0.0f));
@@ -174,6 +176,28 @@ void generalCircleRender(GeneralCircle *c, float x, float y, float aspectRatio) 
 
   glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(transform));
   glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projectionM));
+  glUniform1f(thicknessLoc, 0.95f);
+
+  glBindVertexArray(c->VAO);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+}
+
+void generalCircleRenderThickness(GeneralCircle *c, float x, float y, float thickness, float aspectRatio) {
+
+  c->shader->use();
+  unsigned int transformLoc = glGetUniformLocation(c->shader->ID, "transform");
+  unsigned int projectionLoc = glGetUniformLocation(c->shader->ID, "projection");
+  unsigned int thicknessLoc = glGetUniformLocation(c->shader->ID, "thickness");
+
+  glm::mat4 transform = glm::mat4(1.0f); // make sure to initialize matrix to identity matrix first
+  transform = glm::translate(transform, glm::vec3(x , y, 0.0f));
+
+  glm::mat4 projectionM = glm::mat4(1.0);
+  projectionM[1][1]  = aspectRatio;
+
+  glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(transform));
+  glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projectionM));
+  glUniform1f(thicknessLoc, thickness);
 
   glBindVertexArray(c->VAO);
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -393,6 +417,7 @@ struct Collideable {
 enum RenderableType {
   R_RECT,
   R_CIRCLE,
+  R_HEALTH_CIRCLE,
 };
 
 struct Renderable {
@@ -449,6 +474,7 @@ struct InventoryItem {
 
 struct Health {
   int remainingHp;
+  int maxHp;
 };
 
 struct Entity {
@@ -843,7 +869,7 @@ void createShield(Game *game, Entity *parent) {
   const float SHIELD_TICKS = 60 * 5;
 
   Renderable r;
-  r.type = R_CIRCLE;
+  r.type = R_HEALTH_CIRCLE;
   generalCircleInit(&r.circle, SHIELD_RADIUS, COLOR_PURPLE);
 
   auto *e = new Entity();
@@ -871,6 +897,7 @@ void createShield(Game *game, Entity *parent) {
 
   e->hasHealth = true;
   e->health.remainingHp = 5;
+  e->health.maxHp = 5;
 
   game->entities.push_back(e);
 }
@@ -1000,6 +1027,10 @@ struct CollisionHandler {
 
 struct DestroyHandler {
   virtual void handleDestroy(Game *game, Entity *e) = 0;
+};
+
+struct DamageHandler {
+  virtual void handleRemainingHpChange(Game *game, Entity *e) = 0;
 };
 
 struct CollisionSystem {
@@ -1186,7 +1217,7 @@ struct InventorySystem : CollisionHandler, DestroyHandler {
 
 struct DamageSystem : CollisionHandler {
 
-  static void applyDamage(Game *game, Entity *a, Entity *b) {
+  void applyDamage(Game *game, Entity *a, Entity *b) {
 
     if (a->sendsDamage && b->receivesDamage) {
       if (a->sendDamage.type == b->receiveDamage.type) {
@@ -1201,6 +1232,7 @@ struct DamageSystem : CollisionHandler {
 
         if (b->hasHealth) {
           b->health.remainingHp = std::max(0, b->health.remainingHp - a->sendDamage.hp);
+
           if (b->health.remainingHp == 0) {
             b->destroy = true;
           }
@@ -1313,25 +1345,46 @@ struct DestroySystem {
 
 struct RenderSystem {
 
-  void render(Game *game, Transform *t, Renderable *r) {
-    Point p;
-    if (t->relativeTo == nullptr) {
-      p = t->position;
-    }
-    else {
-      p = t->relativeTo->transform.position; // TODO: this should be recursive
-      p.x += t->position.x;
-      p.y += t->position.y;
-    }
-    switch (r->type) {
-      case R_RECT:
-        generalRectRender(&r->rect, p.x, p.y, game->aspectRatio);
-        break;
-      case R_CIRCLE:
-        generalCircleRender(&r->circle, p.x, p.y, game->aspectRatio);
-        break;
-      default:
-        throw std::runtime_error("dunno render type");
+  static void render (Game * game, Entity *entity) {
+
+  }
+
+  void render(Game *game) {
+
+    for (auto e : game->entities) {
+      Transform *t = &e->transform;
+
+      Point p;
+      if (t->relativeTo == nullptr) {
+        p = t->position;
+      } else {
+        p = t->relativeTo->transform.position; // TODO: this should be recursive
+        p.x += t->position.x;
+        p.y += t->position.y;
+      }
+
+      for (auto r: e->renderables) {
+        switch (r.type) {
+          case R_RECT:
+            generalRectRender(&r.rect, p.x, p.y, game->aspectRatio);
+            break;
+          case R_CIRCLE:
+            generalCircleRender(&r.circle, p.x, p.y, game->aspectRatio);
+            break;
+          case R_HEALTH_CIRCLE: {
+            if (!e->hasHealth) {
+              throw std::runtime_error("no health");
+            }
+            float hp = e->health.remainingHp;
+            float ratioRemaining = hp / e->health.maxHp;
+            float thickness = 1.0f - (0.22 * ratioRemaining);
+            generalCircleRenderThickness(&r.circle, p.x, p.y, thickness, game->aspectRatio);
+            break;
+          }
+          default:
+            throw std::runtime_error("dunno render type");
+        }
+      }
     }
   }
 };
@@ -1405,11 +1458,7 @@ void gameTick(Game *game) {
 
 void gameRender(Game *game) {
   starsRender(&game->stars, &game->starsRenderer);
-  for (auto entity: game->entities) {
-    for (auto r: entity->renderables) {
-      game->renderSystem->render(game, &entity->transform, &r);
-    }
-  }
+  game->renderSystem->render(game);
 }
 
 // only used by window-driven callbacks with no context passed through
