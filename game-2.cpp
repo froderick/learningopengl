@@ -422,6 +422,7 @@ enum DamageType {
 struct SendDamage {
   DamageType type;
   bool destroyOnSend;
+  int hp;
 };
 struct ReceiveDamage {
   DamageType type;
@@ -444,6 +445,10 @@ struct Inventory {
 
 struct InventoryItem {
   bool confersShield;
+};
+
+struct Health {
+  int remainingHp;
 };
 
 struct Entity {
@@ -483,8 +488,8 @@ struct Entity {
   bool isInventoryItem = false;
   InventoryItem inventoryItem;
 
-  bool isShield = false;
-  bool isEnemy = false;
+  bool hasHealth = false;
+  Health health;
 
   bool destroy = false;
 };
@@ -673,14 +678,13 @@ Entity* createEnemyShip(Game *game) {
 
   e->sendsDamage = true;
   e->sendDamage = {.type = DAMAGES_PLAYER, .destroyOnSend = true};
+  e->sendDamage.hp = 1;
   e->receivesDamage = true;
   e->receiveDamage = {.type = DAMAGES_ENEMY, .destroyOnReceive = true};
 
   e->hasEnemyAttack = true;
   e->enemyAttack.maxTicks = ENEMY_SHIP_FIRE_DELAY_TICKS;
   e->enemyAttack.ticksRemaining = 0;
-
-  e->isEnemy = true;
 
   game->entities.push_back(e);
 
@@ -719,6 +723,7 @@ void createEnemyShipLaser(Game *game, Point p) {
 
   e->sendsDamage = true;
   e->sendDamage = {.type = DAMAGES_PLAYER, .destroyOnSend = true};
+  e->sendDamage.hp = 1;
   e->receivesDamage = true;
   e->receiveDamage = {.type = DAMAGES_ENEMY, .destroyOnReceive = true};
 
@@ -858,11 +863,14 @@ void createShield(Game *game, Entity *parent) {
 
   e->sendsDamage = true;
   e->sendDamage = {.type = DAMAGES_ENEMY};
+  e->receivesDamage = true;
+  e->receiveDamage = {.type = DAMAGES_PLAYER, .destroyOnReceive = false};
 
   e->isInventoryItem = true;
   e->inventoryItem.confersShield = true;
 
-  e->isShield = true;
+  e->hasHealth = true;
+  e->health.remainingHp = 5;
 
   game->entities.push_back(e);
 }
@@ -983,7 +991,7 @@ struct MovementSystem {
 
 struct Collision {
   Entity *a, *b;
-  Collideable *collA, *collB;
+//  Collideable *collA, *collB;
 };
 
 struct CollisionHandler {
@@ -1095,18 +1103,29 @@ struct CollisionSystem {
               }
 
               if (collides) {
-                Collision c;
-                c.a = entityA;
-                c.b = entityB;
-                c.collA = compA;
-                c.collB = compB;
-                collisions.push_back(c);
+
+                // avoid duplicate collisions between entities
+                bool isDup = false;
+                for (auto dup : collisions) {
+                  if ((dup.a == entityA && dup.b == entityB) || (dup.a == entityB && dup.b == entityA)) {
+                    isDup = true;
+                    break;
+                  }
+                }
+
+                if (!isDup) {
+                  Collision c;
+                  c.a = entityA;
+                  c.b = entityB;
+                  collisions.push_back(c);
+                }
               }
             }
           }
         }
       }
     }
+
     return collisions;
   }
 
@@ -1153,6 +1172,7 @@ struct InventorySystem : CollisionHandler, DestroyHandler {
 
   void handleCollision(Game *game, Collision c) override {
     applyPowerUps(game, c.a, c.b);
+    applyPowerUps(game, c.b, c.a);
   }
 
   void handleDestroy(Game* game, Entity *e) override {
@@ -1168,16 +1188,22 @@ struct DamageSystem : CollisionHandler {
 
   static void applyDamage(Game *game, Entity *a, Entity *b) {
 
-    Entity *ship = findShip(game);
-
     if (a->sendsDamage && b->receivesDamage) {
       if (a->sendDamage.type == b->receiveDamage.type) {
 
         if (a->sendDamage.destroyOnSend) {
           a->destroy = true;
         }
+
         if (b->receiveDamage.destroyOnReceive) {
           b->destroy = true;
+        }
+
+        if (b->hasHealth) {
+          b->health.remainingHp = std::max(0, b->health.remainingHp - a->sendDamage.hp);
+          if (b->health.remainingHp == 0) {
+            b->destroy = true;
+          }
         }
       }
     }
@@ -1185,6 +1211,7 @@ struct DamageSystem : CollisionHandler {
 
   void handleCollision(Game *game, Collision c) override {
     applyDamage(game, c.a, c.b);
+    applyDamage(game, c.b, c.a);
   }
 };
 
