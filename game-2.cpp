@@ -529,6 +529,10 @@ struct Inventory {
   bool shielded;
 };
 
+struct InventoryItem {
+  bool confersShield;
+};
+
 struct Entity {
   Transform transform{};
 
@@ -560,8 +564,11 @@ struct Entity {
   bool sendsPowerUps = false;
   SendPowerUp sendPowerUp;
 
-  bool hasInventory;
+  bool hasInventory = false;
   Inventory inventory;
+
+  bool isInventoryItem = false;
+  InventoryItem inventoryItem;
 
   bool isShield = false;
   bool isEnemy = false;
@@ -575,7 +582,7 @@ struct RenderSystem;
 struct DestroySystem;
 struct CollisionSystem;
 struct EnemyAttackSystem;
-struct PowerUpSystem;
+struct InventorySystem;
 struct DamageSystem;
 
 struct Game {
@@ -594,7 +601,7 @@ struct Game {
   DestroySystem *destroySystem;
   CollisionSystem *collisionSystem;
   EnemyAttackSystem *enemyAttackSystem;
-  PowerUpSystem *powerUpSystem;
+  InventorySystem *inventorySystem;
   DamageSystem *damageSystem;
 
   uint64_t objectIdCounter = 0;
@@ -737,7 +744,11 @@ struct Collision {
 };
 
 struct CollisionHandler {
-  virtual void handle(Game *game, Collision collision) = 0;
+  virtual void handleCollision(Game *game, Collision collision) = 0;
+};
+
+struct DestroyHandler {
+  virtual void handleDestroy(Game *game, Entity *e) = 0;
 };
 
 struct CollisionSystem {
@@ -870,13 +881,13 @@ struct CollisionSystem {
       }
 
       for (auto h : handlers) {
-        h->handle(game, c);
+        h->handleCollision(game, c);
       }
     }
   }
 };
 
-struct PowerUpSystem : CollisionHandler {
+struct InventorySystem : CollisionHandler, DestroyHandler {
 
   static void applyPowerUps(Game *game, Entity *a, Entity *b) {
 
@@ -897,8 +908,16 @@ struct PowerUpSystem : CollisionHandler {
     }
   }
 
-  void handle(Game *game, Collision c) override {
+  void handleCollision(Game *game, Collision c) override {
     applyPowerUps(game, c.a, c.b);
+  }
+
+  void handleDestroy(Game* game, Entity *e) override {
+    if (e->isInventoryItem && e->inventoryItem.confersShield) {
+      if (e->transform.relativeTo != nullptr && e->transform.relativeTo->hasInventory) {
+        e->transform.relativeTo->inventory.shielded = false;
+      }
+    }
   }
 };
 
@@ -921,7 +940,7 @@ struct DamageSystem : CollisionHandler {
     }
   }
 
-  void handle(Game *game, Collision c) override {
+  void handleCollision(Game *game, Collision c) override {
     applyDamage(game, c.a, c.b);
   }
 };
@@ -952,7 +971,10 @@ struct EnemyAttackSystem {
   }
 };
 
+
 struct DestroySystem {
+
+  std::vector<DestroyHandler*> handlers;
 
   /*
    * iterate over the root entities
@@ -987,6 +1009,10 @@ struct DestroySystem {
     for (auto it = game->entities.begin(); it != game->entities.end();) {
       Entity *e = *it;
       if (e->destroy) {
+
+        for (auto h : handlers) {
+          h->handleDestroy(game, e);
+        }
 
         if (e->transform.relativeTo != nullptr) {
 
@@ -1304,6 +1330,9 @@ void createShield(Game *game, Entity *parent) {
   e->sendsDamage = true;
   e->sendDamage = {.type = DAMAGES_ENEMY};
 
+  e->isInventoryItem = true;
+  e->inventoryItem.confersShield = true;
+
   e->isShield = true;
 
   game->entities.push_back(e);
@@ -1327,11 +1356,13 @@ void gameInit(Game *game) {
   game->destroySystem = new DestroySystem();
   game->collisionSystem = new CollisionSystem();
   game->enemyAttackSystem = new EnemyAttackSystem();
-  game->powerUpSystem = new PowerUpSystem();
+  game->inventorySystem = new InventorySystem();
   game->damageSystem = new DamageSystem();
 
-  game->collisionSystem->handlers.push_back(game->powerUpSystem);
+  game->collisionSystem->handlers.push_back(game->inventorySystem);
   game->collisionSystem->handlers.push_back(game->damageSystem);
+
+  game->destroySystem->handlers.push_back(game->inventorySystem);
 
   createShip(game);
 
