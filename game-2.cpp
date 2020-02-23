@@ -351,39 +351,6 @@ bool pointIsOffScreen(Point p) {
   return p.x < -1 || p.x > 1 || p.y < -1 || p.y > 1;
 }
 
-bool rectsCollide(Rect a, Rect b) {
-  return (a.x + a.width) > b.x && a.x < (b.x + b.width) && (a.y - a.height) < b.y && a.y > (b.y - b.height);
-}
-
-bool circleRectCollide(Circle circle, Rect r) {
-
-  float cx = circle.x;
-  float cy = circle.y;
-
-  // temporary variables to set edges for testing
-  float testX = cx;
-  float testY = cy;
-
-  // which edge is closest?
-  if (cx < r.x)        testX = r.x;      // test left edge
-  else if (cx > r.x+ r.width) testX = r.x + r.width;   // right edge
-  if (cy > r.y)         testY = r.y;      // top edge
-  else if (cy < r.y - r.height) testY = r.y - r.height;   // bottom edge
-
-  // get distance from closest edges
-  float distX = cx-testX;
-  float distY = cy-testY;
-  float distance = sqrt( (distX*distX) + (distY*distY) );
-
-  // if the distance is less than the radius, collision!
-  if (distance <= circle.radius) {
-    return true;
-  }
-  return false;
-}
-
-
-
 // top-level game //////////////////
 
 
@@ -551,16 +518,15 @@ struct ReceiveDamage {
 /*
  * Power Ups are applied on the basis of a SendPowerUp entity colliding with a ReceivePowerUp entity.
  */
-enum PowerUpType {
-  UP_LASER, UP_SHIELD,
-};
 struct SendPowerUp {
-  PowerUpType type;
-  int maxCount;
   bool destroyOnSend;
+  bool improvesLaser;
+  bool confersShield;
 };
-struct PowerUp {
-  PowerUpType type;
+
+struct Inventory {
+  int laserLevel;
+  bool shielded;
 };
 
 struct Entity {
@@ -593,8 +559,9 @@ struct Entity {
 
   bool sendsPowerUps = false;
   SendPowerUp sendPowerUp;
-  bool receivesPowerUps = false;
-  std::vector<PowerUp> powerUps;
+
+  bool hasInventory;
+  Inventory inventory;
 
   bool isShield = false;
   bool isEnemy = false;
@@ -608,6 +575,8 @@ struct RenderSystem;
 struct DestroySystem;
 struct CollisionSystem;
 struct EnemyAttackSystem;
+struct PowerUpSystem;
+struct DamageSystem;
 
 struct Game {
 
@@ -625,6 +594,8 @@ struct Game {
   DestroySystem *destroySystem;
   CollisionSystem *collisionSystem;
   EnemyAttackSystem *enemyAttackSystem;
+  PowerUpSystem *powerUpSystem;
+  DamageSystem *damageSystem;
 
   uint64_t objectIdCounter = 0;
   std::vector<Entity*> entities;
@@ -678,14 +649,7 @@ struct UserInputSystem {
     }
     if (i->continueFiring && i->fireDelayTicks == 0) {
 
-      int numLaserPoweUpsCollected = 0;
-      for (auto up : ship->powerUps) {
-        if (up.type == UP_LASER) {
-          numLaserPoweUpsCollected++;
-        }
-      }
-
-      switch (numLaserPoweUpsCollected) {
+      switch (ship->inventory.laserLevel) {
         case 0:
           createShipLaser(game, 0);
           break;
@@ -752,15 +716,6 @@ struct MovementSystem {
 
 };
 
-struct Collision {
-  Entity *a, *b;
-  Collideable *collA, *collB;
-};
-
-struct CollisionHandler {
-  virtual void handle(Game *game, Collision collision) = 0;
-};
-
 void createShield(Game *game, Entity *e);
 
 /*
@@ -775,9 +730,21 @@ void createShield(Game *game, Entity *e);
 
  perhaps each system is a listener (damage, health, etc)
  */
+
+struct Collision {
+  Entity *a, *b;
+  Collideable *collA, *collB;
+};
+
+struct CollisionHandler {
+  virtual void handle(Game *game, Collision collision) = 0;
+};
+
 struct CollisionSystem {
 
-  Point absPosition(Entity *e) {
+  std::vector<CollisionHandler*> handlers;
+
+  static Point absPosition(Entity *e) {
     Point p;
     if (e->transform.relativeTo == nullptr) {
       p = e->transform.position;
@@ -790,7 +757,7 @@ struct CollisionSystem {
     return p;
   }
 
-  Rect absRect(Entity *e, Collideable *c) {
+  static Rect absRect(Entity *e, Collideable *c) {
     Point p = absPosition(e);
     return {
       .x = p.x + c->rect.x,
@@ -800,7 +767,7 @@ struct CollisionSystem {
     };
   }
 
-  Circle absCircle(Entity *e, Collideable *c) {
+  static Circle absCircle(Entity *e, Collideable *c) {
     Point p = absPosition(e);
     return {
         .x = p.x + c->rect.x,
@@ -809,7 +776,38 @@ struct CollisionSystem {
     };
   }
 
-  std::vector<Collision> findCollisions(Game *game) {
+  static bool rectsCollide(Rect a, Rect b) {
+    return (a.x + a.width) > b.x && a.x < (b.x + b.width) && (a.y - a.height) < b.y && a.y > (b.y - b.height);
+  }
+
+  static bool circleRectCollide(Circle circle, Rect r) {
+
+    float cx = circle.x;
+    float cy = circle.y;
+
+    // temporary variables to set edges for testing
+    float testX = cx;
+    float testY = cy;
+
+    // which edge is closest?
+    if (cx < r.x)        testX = r.x;      // test left edge
+    else if (cx > r.x+ r.width) testX = r.x + r.width;   // right edge
+    if (cy > r.y)         testY = r.y;      // top edge
+    else if (cy < r.y - r.height) testY = r.y - r.height;   // bottom edge
+
+    // get distance from closest edges
+    float distX = cx-testX;
+    float distY = cy-testY;
+    float distance = sqrt( (distX*distX) + (distY*distY) );
+
+    // if the distance is less than the radius, collision!
+    if (distance <= circle.radius) {
+      return true;
+    }
+    return false;
+  }
+
+  static std::vector<Collision> findCollisions(Game *game) {
     std::vector<Collision> collisions;
 
     for (auto entityA : game->entities) {
@@ -858,7 +856,55 @@ struct CollisionSystem {
     return collisions;
   }
 
-  void applyDamage(Game *game, Entity *a, Entity *b) {
+  void collide(Game *game) {
+
+    auto collisions = findCollisions(game);
+
+    if (!collisions.empty()) {
+      printf("collisions: %lu\n", collisions.size());
+    }
+    for (auto c : collisions) {
+
+      if (c.a->destroy || c.b->destroy) {
+        continue; // don't process collisions with destroyed objects
+      }
+
+      for (auto h : handlers) {
+        h->handle(game, c);
+      }
+    }
+  }
+};
+
+struct PowerUpSystem : CollisionHandler {
+
+  static void applyPowerUps(Game *game, Entity *a, Entity *b) {
+
+    if (a->sendsPowerUps && b->hasInventory) {
+
+      if (a->sendPowerUp.destroyOnSend) {
+        a->destroy = true;
+      }
+
+      if (a->sendPowerUp.confersShield && !b->inventory.shielded) {
+        b->inventory.shielded = true;
+        createShield(game, b);
+      }
+
+      if (a->sendPowerUp.improvesLaser && b->inventory.laserLevel < 3) {
+        b->inventory.laserLevel++;
+      }
+    }
+  }
+
+  void handle(Game *game, Collision c) override {
+    applyPowerUps(game, c.a, c.b);
+  }
+};
+
+struct DamageSystem : CollisionHandler {
+
+  static void applyDamage(Game *game, Entity *a, Entity *b) {
 
     Entity *ship = findShip(game);
 
@@ -875,50 +921,12 @@ struct CollisionSystem {
     }
   }
 
-  void applyPowerUps(Game *game, Entity *a, Entity *b) {
-
-    if (a->sendsPowerUps && b->receivesPowerUps) {
-
-      if (a->sendPowerUp.destroyOnSend) {
-        a->destroy = true;
-      }
-
-      int total = 0;
-      for (auto up : b->powerUps) {
-        if (up.type == a->sendPowerUp.type) {
-          total++;
-        }
-      }
-      if (total < a->sendPowerUp.maxCount) {
-        b->powerUps.push_back({.type = a->sendPowerUp.type});
-
-        // TODO: this should be an event
-        if (a->sendPowerUp.type == UP_SHIELD) {
-          createShield(game, b);
-        }
-      }
-    }
-  }
-
-  void collide(Game *game) {
-
-    auto collisions = findCollisions(game);
-
-    if (!collisions.empty()) {
-      printf("collisions: %lu\n", collisions.size());
-    }
-    for (auto c : collisions) {
-
-      if (c.a->destroy || c.b->destroy) {
-        continue; // don't process collisions with destroyed objects
-      }
-
-      // TODO: these will become event listeners
-      applyPowerUps(game, c.a, c.b);
-      applyDamage(game, c.a, c.b);
-    }
+  void handle(Game *game, Collision c) override {
+    applyDamage(game, c.a, c.b);
   }
 };
+
+//applyDamage(game, c.a, c.b);
 
 struct EnemyAttackSystem {
 
@@ -1059,7 +1067,8 @@ void createShip(Game *game) {
   ship->receivesDamage = true;
   ship->receiveDamage = {.type = DAMAGES_PLAYER, .destroyOnReceive = true};
 
-  ship->receivesPowerUps = true;
+  ship->hasInventory = true;
+  ship->inventory = {.laserLevel = 1, .shielded = false};
 
   game->entities.push_back(ship);
 }
@@ -1223,8 +1232,7 @@ void createLaserPowerUp(Game *game) {
 
   e->sendsPowerUps = true;
   e->sendPowerUp.destroyOnSend = true;
-  e->sendPowerUp.type = UP_LASER;
-  e->sendPowerUp.maxCount = 3;
+  e->sendPowerUp.improvesLaser = true;
 
   game->entities.push_back(e);
 }
@@ -1267,8 +1275,7 @@ void createShieldPowerUp(Game *game) {
 
   e->sendsPowerUps = true;
   e->sendPowerUp.destroyOnSend = true;
-  e->sendPowerUp.type = UP_SHIELD;
-  e->sendPowerUp.maxCount = 1;
+  e->sendPowerUp.confersShield = true;
 
   game->entities.push_back(e);
 }
@@ -1320,6 +1327,11 @@ void gameInit(Game *game) {
   game->destroySystem = new DestroySystem();
   game->collisionSystem = new CollisionSystem();
   game->enemyAttackSystem = new EnemyAttackSystem();
+  game->powerUpSystem = new PowerUpSystem();
+  game->damageSystem = new DamageSystem();
+
+  game->collisionSystem->handlers.push_back(game->powerUpSystem);
+  game->collisionSystem->handlers.push_back(game->damageSystem);
 
   createShip(game);
 
