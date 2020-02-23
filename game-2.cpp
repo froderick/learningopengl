@@ -607,7 +607,7 @@ void createShip(Game *game) {
   ship->receiveDamage = {.type = DAMAGES_PLAYER, .destroyOnReceive = true};
 
   ship->hasInventory = true;
-  ship->inventory = {.laserLevel = 1, .shielded = false};
+  ship->inventory = {.laserLevel = 0, .shielded = false};
 
   game->entities.push_back(ship);
 }
