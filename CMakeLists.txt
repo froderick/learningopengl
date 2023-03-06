@@ -12,7 +12,7 @@ find_package(OpenGL REQUIRED)
 find_package(glm REQUIRED)
 
 add_executable(hello-window hello-window.cpp stb_image.cpp)
-target_link_libraries(hello-window glew glfw glm ${OPENGL_gl_LIBRARY})
+target_link_libraries(hello-window glew glfw glm::glm ${OPENGL_gl_LIBRARY})
 
 add_executable(game2 game-2.cpp stb_image.cpp)
-target_link_libraries(game2 glew glfw glm ${OPENGL_gl_LIBRARY})
+target_link_libraries(game2 glew glfw glm::glm ${OPENGL_gl_LIBRARY})
