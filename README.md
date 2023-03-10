@@ -30,15 +30,15 @@ $ make
 
 ## hello-window
 
-This is just a simple animation of a texture pulled from learnopengl.com.
+This is a simple animation of a texture pulled from learnopengl.com.
 
-![hello-window](hello-window.png)
+<img src="hello-window.png" width="600"/>
 
 ## game2
 
-This is a simple example of drawing lots of rectangles to simulate a top-down space shooter environment.
+This is an example of animating lots of rectangles to simulate a top-down space shooter environment.
 
-![game2](game2.png)
+<img src="game2.png" width="600"/>
 
 
 
