@@ -10,29 +10,36 @@ First up, I couldn't get anything to work well in the getting started section of
 brew install glfw glew glm
 ```
 
-At this point I had a purple triangle on the screen, yay.
+I set up the build with CMake:
 
-/*
+```bash
+$ cmake .
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /Users/michaelhenry/dev/funtastic/branches/learningopengl
+$ make
+[ 16%] Building CXX object CMakeFiles/hello-window.dir/hello-window.cpp.o
+[ 33%] Building CXX object CMakeFiles/hello-window.dir/stb_image.cpp.o
+[ 50%] Linking CXX executable hello-window
+[ 50%] Built target hello-window
+[ 66%] Building CXX object CMakeFiles/game2.dir/game-2.cpp.o
+[ 83%] Building CXX object CMakeFiles/game2.dir/stb_image.cpp.o
+[100%] Linking CXX executable game2
+[100%] Built target game2
+```
 
- transform -> relative position
- children -> holds references to child entities
- collides -> fires collision events
- health -> has hp, can receive damage, loses hp on damage, destroys when hp=0
- applies-collision-damage -> applies damage to things that take collision damage
- takes-collision-damage -> takes damage when colliding with things that apply collision damage
- absorbs-damage
- expires -> self-destructs after time
- power-up -> specifies the type of power up this is
+## hello-window
 
- applies-collision-child -> on collision, adds a child entity to the thing it collides with
+This is just a simple animation of a texture pulled from learnopengl.com.
 
- */
+![hello-window](hello-window.png)
 
-// TODO: these components are too concrete, there should be more decomposed things like
-//  - Transform - x/y coordinates + rotation + optionally relative to another entity
-//  - Collidable - local x/y/width/height coordinates, subject to transformation before eval
-//  - Velocity - x/y movement vectors
-//  - ZigZagMovement
-//  - SpiralMovement
-//  - RelativeMovement
-// Velocity, AINav, etc
+## game2
+
+This is a simple example of drawing lots of rectangles to simulate a top-down space shooter environment.
+
+![game2](game2.png)
+
+
+
+
